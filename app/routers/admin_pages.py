@@ -1,0 +1,169 @@
+"""
+Trang HTML Admin — layout riêng, RBAC.
+"""
+
+import json
+from datetime import datetime
+
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+
+from app.config import (
+    MQTT_WS_URL,
+    MQTT_USERNAME,
+    MQTT_PASSWORD,
+    MQTT_USE_SERVER_BRIDGE,
+    MQTT_BRIDGE_WEB_PATH,
+    MQTT_TOPIC_STATUS,
+    MQTT_TOPIC_TELEMETRY,
+    MQTT_TOPIC_POSITION,
+    MQTT_TOPIC_MOTORS,
+    MQTT_TOPIC_COMMAND,
+    MQTT_TOPIC_CONTROL,
+    MQTT_CLIENT_PREFIX,
+    ROBOT_STATUS_UGV_TOPICS,
+    CAMPUS_ORIGIN_LAT,
+    CAMPUS_ORIGIN_LON,
+    CAMPUS_ORIGIN_ALT,
+)
+from app.services.auth_service import get_current_user
+from app.services.booking_service import get_admin_queue_bookings
+
+templates = Jinja2Templates(directory="app/templates")
+router = APIRouter(prefix="/admin", tags=["Admin Pages"])
+
+
+def _redirect_login() -> RedirectResponse:
+    return RedirectResponse(url="/login", status_code=302)
+
+
+def _redirect_client_home() -> RedirectResponse:
+    return RedirectResponse(url="/dashboard", status_code=302)
+
+
+def _require_admin_page(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return None, _redirect_login()
+    if user.role != "admin":
+        return None, _redirect_client_home()
+    return user, None
+
+
+def _mqtt_ctx() -> dict:
+    return {
+        "mqtt_ws_url": MQTT_WS_URL,
+        "mqtt_client_prefix": MQTT_CLIENT_PREFIX,
+        "mqtt_username": MQTT_USERNAME,
+        "mqtt_password": MQTT_PASSWORD,
+        "mqtt_use_server_bridge": MQTT_USE_SERVER_BRIDGE,
+        "mqtt_bridge_path": MQTT_BRIDGE_WEB_PATH,
+        "mqtt_topic_status": MQTT_TOPIC_STATUS,
+        "mqtt_topic_telemetry": MQTT_TOPIC_TELEMETRY,
+        "mqtt_topic_position": MQTT_TOPIC_POSITION,
+        "mqtt_topic_motors": MQTT_TOPIC_MOTORS,
+        "mqtt_topic_command": MQTT_TOPIC_COMMAND,
+        "mqtt_topic_control": MQTT_TOPIC_CONTROL,
+    }
+
+
+@router.get("", response_class=HTMLResponse)
+async def admin_root(request: Request):
+    user, redir = _require_admin_page(request)
+    if redir:
+        return redir
+    return RedirectResponse(url="/admin/orders", status_code=302)
+
+
+@router.get("/orders", response_class=HTMLResponse)
+async def admin_orders(request: Request):
+    user, redir = _require_admin_page(request)
+    if redir:
+        return redir
+    bookings = get_admin_queue_bookings()
+    ctx = {
+        "user": user,
+        "admin_page": "orders",
+        "bookings": bookings,
+        "bookings_json": json.dumps(bookings, ensure_ascii=False, default=str),
+        "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        **_mqtt_ctx(),
+    }
+    return templates.TemplateResponse(request, "admin/orders.html", ctx)
+
+
+@router.get("/robot", response_class=HTMLResponse)
+async def admin_robot(request: Request):
+    user, redir = _require_admin_page(request)
+    if redir:
+        return redir
+    ctx = {
+        "user": user,
+        "admin_page": "robot",
+        "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "robot_status_ugv_topics": ROBOT_STATUS_UGV_TOPICS,
+        "campus_origin_lat": CAMPUS_ORIGIN_LAT,
+        "campus_origin_lon": CAMPUS_ORIGIN_LON,
+        "campus_origin_alt": CAMPUS_ORIGIN_ALT,
+        **_mqtt_ctx(),
+    }
+    return templates.TemplateResponse(request, "admin/robot_status.html", ctx)
+
+
+@router.get("/tracking", response_class=HTMLResponse)
+async def admin_tracking(request: Request):
+    user, redir = _require_admin_page(request)
+    if redir:
+        return redir
+    ctx = {
+        "user": user,
+        "admin_page": "tracking",
+        "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "mqtt_topic_heading": ROBOT_STATUS_UGV_TOPICS["heading"],
+        **_mqtt_ctx(),
+    }
+    return templates.TemplateResponse(request, "admin/tracking.html", ctx)
+
+
+@router.get("/plotting", response_class=HTMLResponse)
+async def admin_plotting(request: Request):
+    user, redir = _require_admin_page(request)
+    if redir:
+        return redir
+    ctx = {
+        "user": user,
+        "admin_page": "plotting",
+        "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "robot_status_ugv_topics": ROBOT_STATUS_UGV_TOPICS,
+        **_mqtt_ctx(),
+    }
+    return templates.TemplateResponse(request, "admin/plotting.html", ctx)
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def admin_settings(request: Request):
+    user, redir = _require_admin_page(request)
+    if redir:
+        return redir
+    ctx = {
+        "user": user,
+        "admin_page": "settings",
+        "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        **_mqtt_ctx(),
+    }
+    return templates.TemplateResponse(request, "admin/settings.html", ctx)
+
+
+@router.get("/emergency", response_class=HTMLResponse)
+async def admin_emergency(request: Request):
+    user, redir = _require_admin_page(request)
+    if redir:
+        return redir
+    ctx = {
+        "user": user,
+        "admin_page": "emergency",
+        "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        **_mqtt_ctx(),
+    }
+    return templates.TemplateResponse(request, "admin/emergency.html", ctx)

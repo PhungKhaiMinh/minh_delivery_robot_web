@@ -133,6 +133,40 @@ def cancel_booking(booking_id: str, user_id: str) -> tuple[bool, str]:
         return False, "Đã xảy ra lỗi khi hủy đơn"
 
 
+def get_admin_queue_bookings() -> list[dict]:
+    """
+    Đơn cho Admin: pending / confirmed / in_progress (hiển thị Pending hoặc Shipping).
+    Gắn thêm _customer_name từ users.
+    """
+    try:
+        all_bookings = db.collection("bookings").get_all()
+        want = {"pending", "confirmed", "in_progress"}
+        filtered = [b for b in all_bookings if b.get("status") in want]
+        name_cache: dict[str, str] = {}
+
+        def customer_name(uid: str) -> str:
+            if not uid:
+                return "—"
+            if uid not in name_cache:
+                doc = db.collection("users").document(uid).get()
+                name_cache[uid] = doc.get("name", "—") if doc else "—"
+            return name_cache[uid]
+
+        for b in filtered:
+            b["_customer_name"] = customer_name(b.get("user_id", ""))
+            st = b.get("status", "")
+            if st == "pending":
+                b["_admin_status_label"] = "Pending"
+            else:
+                b["_admin_status_label"] = "Shipping"
+
+        filtered.sort(key=lambda x: x.get("_created_at", ""), reverse=True)
+        return filtered
+    except Exception as e:
+        print(f"[BOOKING ERROR] Lỗi admin queue: {e}")
+        return []
+
+
 def get_active_bookings(user_id: str) -> list[dict]:
     """Lấy các đơn đang hoạt động (pending, confirmed, in_progress)."""
     try:

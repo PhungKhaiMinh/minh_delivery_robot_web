@@ -8,7 +8,8 @@ Mật khẩu được hash bằng bcrypt trước khi lưu trữ.
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from passlib.context import CryptContext
+
+import bcrypt
 from jose import JWTError, jwt
 from fastapi import Request, HTTPException
 
@@ -16,24 +17,27 @@ from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.services.db_service import db
 from app.models.user import UserRegister, UserProfile
 
-# Cấu hình bcrypt để hash mật khẩu an toàn
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(password: str) -> str:
-    """Mã hóa mật khẩu bằng bcrypt."""
-    return pwd_context.hash(password)
+    """Mã hóa mật khẩu bằng bcrypt (trực tiếp qua thư viện bcrypt, tương thích mọi phiên bản)."""
+    pw = password.encode("utf-8")
+    return bcrypt.hashpw(pw, bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """So sánh mật khẩu nhập vào với hash đã lưu."""
     try:
-        return pwd_context.verify(plain_password, hashed_password)
+        if not hashed_password:
+            return False
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"),
+            hashed_password.encode("utf-8"),
+        )
     except Exception:
         return False
 
 
-def create_access_token(user_id: str, email: str) -> str:
+def create_access_token(user_id: str, email: str, role: str = "client") -> str:
     """
     Tạo JWT access token chứa thông tin user.
     Token có thời hạn được cấu hình trong config.
@@ -42,6 +46,7 @@ def create_access_token(user_id: str, email: str) -> str:
     payload = {
         "sub": user_id,
         "email": email,
+        "role": role if role in ("admin", "client") else "client",
         "exp": expire,
         "iat": datetime.now(timezone.utc),
     }
@@ -85,6 +90,7 @@ def register_user(data: UserRegister) -> tuple[Optional[UserProfile], str]:
             "phone": data.phone,
             "email": data.email,
             "password_hash": hash_password(data.password),
+            "role": "client",
         }
 
         user_id, success = users_col.add(user_data)
@@ -96,6 +102,7 @@ def register_user(data: UserRegister) -> tuple[Optional[UserProfile], str]:
             name=data.name,
             phone=data.phone,
             email=data.email,
+            role="client",
         )
         return profile, ""
 
@@ -121,13 +128,17 @@ def login_user(email: str, password: str) -> tuple[Optional[str], Optional[UserP
             return None, None, "Email hoặc mật khẩu không đúng"
 
         user_id = user_data["_id"]
-        token = create_access_token(user_id, email)
+        role = user_data.get("role") or "client"
+        if role not in ("admin", "client"):
+            role = "client"
+        token = create_access_token(user_id, email, role)
 
         profile = UserProfile(
             id=user_id,
             name=user_data["name"],
             phone=user_data["phone"],
             email=user_data["email"],
+            role=role,
             created_at=user_data.get("_created_at"),
         )
 
@@ -160,11 +171,16 @@ def get_current_user(request: Request) -> Optional[UserProfile]:
         if not user_data:
             return None
 
+        role = user_data.get("role") or "client"
+        if role not in ("admin", "client"):
+            role = "client"
+
         return UserProfile(
             id=user_id,
             name=user_data["name"],
             phone=user_data["phone"],
             email=user_data["email"],
+            role=role,
             created_at=user_data.get("_created_at"),
         )
     except Exception:
@@ -179,4 +195,14 @@ def require_auth(request: Request) -> UserProfile:
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Vui lòng đăng nhập")
+    return user
+
+
+def require_admin(request: Request) -> UserProfile:
+    """API: bắt buộc đăng nhập và role admin."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Vui lòng đăng nhập")
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Không có quyền quản trị")
     return user

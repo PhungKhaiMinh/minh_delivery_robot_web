@@ -9,8 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.config import APP_NAME, APP_DESCRIPTION, APP_VERSION
-from app.routers import auth, booking, tracking, profile, pages
+from app.routers import auth, booking, tracking, profile, pages, admin_api, admin_pages, admin_mqtt_bridge
 from app.services.robot_service import init_default_robot
+from app.services.seed_users import ensure_demo_users
+from app.services.mqtt_client import mqtt_service
+from app.services.scheduler_service import start_scheduler, stop_scheduler
 
 
 @asynccontextmanager
@@ -21,13 +24,19 @@ async def lifespan(app: FastAPI):
     print(f"  {APP_DESCRIPTION}")
     print(f"{'='*50}\n")
 
-    # Tạo robot mặc định cho demo
     init_default_robot()
+    ensure_demo_users()
+
+    mqtt_service.start()
+    start_scheduler()
+
     print("[STARTUP] Hệ thống sẵn sàng!\n")
 
     yield
 
     print("\n[SHUTDOWN] Đang tắt hệ thống...")
+    stop_scheduler()
+    mqtt_service.stop()
 
 
 app = FastAPI(
@@ -54,6 +63,9 @@ app.include_router(auth.router)
 app.include_router(booking.router)
 app.include_router(tracking.router)
 app.include_router(profile.router)
+app.include_router(admin_api.router)
+app.include_router(admin_mqtt_bridge.router)
+app.include_router(admin_pages.router)
 
 # === Đăng ký Page router (phải sau API routers) ===
 app.include_router(pages.router)

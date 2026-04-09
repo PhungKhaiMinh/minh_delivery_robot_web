@@ -256,6 +256,13 @@ class FirestoreOffline:
 
 
 # === Singleton instance cho toàn bộ ứng dụng ===
-from app.config import DATA_DIR
+from app.config import DATA_DIR, FIREBASE_CREDENTIALS_PATH, USE_FIRESTORE
 
-db = FirestoreOffline(DATA_DIR)
+if USE_FIRESTORE:
+    from app.services.firestore_db import get_firestore_cloud
+
+    db = get_firestore_cloud()
+    print(f"[DB] Cloud Firestore (Firebase) — Service Account: {FIREBASE_CREDENTIALS_PATH}")
+else:
+    db = FirestoreOffline(DATA_DIR)
+    print(f"[DB] File JSON local — {DATA_DIR}")

@@ -174,7 +174,8 @@ async function handleLogin(e) {
         
         if (data.success) {
             showToast('Đăng nhập thành công!', 'success');
-            setTimeout(() => window.location.href = '/dashboard', 500);
+            const next = data.redirect || '/dashboard';
+            setTimeout(() => { window.location.href = next; }, 500);
         } else {
             errorText.textContent = data.message;
             errorDiv.classList.remove('hidden');

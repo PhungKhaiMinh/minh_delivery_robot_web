@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Admin{% endblock %} | BK BookBot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        admin: { 900: '#0f172a', 800: '#1e293b', 700: '#334155', accent: '#38bdf8' },
+                    },
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+                },
+            },
+        };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/static/css/custom.css">
+    {% block admin_head %}{% endblock %}
+</head>
+<body class="h-full bg-slate-100 font-sans antialiased text-slate-900">
+    <div class="min-h-full flex" x-data="{ mobileNav: false }">
+        {% include "components/admin_sidebar.html" %}
+
+        <!-- Mobile overlay -->
+        <div
+            x-show="mobileNav"
+            x-transition.opacity
+            class="fixed inset-0 bg-black/50 z-40 md:hidden"
+            @click="mobileNav = false"
+            style="display: none;"
+        ></div>
+
+        <div class="flex-1 flex flex-col min-w-0">
+            <header class="sticky top-0 z-30 flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-200 shadow-sm md:hidden">
+                <button type="button" @click="mobileNav = true" class="p-2 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Mở menu">
+                    <i data-lucide="menu" class="w-6 h-6"></i>
+                </button>
+                <span class="font-semibold text-slate-800">Admin</span>
+            </header>
+
+            <main class="flex-1 p-4 md:p-8 overflow-auto">
+                {% block admin_content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+
+    <div id="toast-container" class="fixed top-4 right-4 z-[9999] space-y-2"></div>
+    <script src="/static/js/app.js"></script>
+    <script>
+        window.BOOKBOT_MQTT_MODE = {% if mqtt_use_server_bridge is defined and mqtt_use_server_bridge %}'bridge'{% else %}'direct'{% endif %};
+        window.BOOKBOT_MQTT_BRIDGE_PATH = {% if mqtt_bridge_path is defined %}{{ mqtt_bridge_path|tojson }}{% else %}"/api/admin/mqtt-bridge"{% endif %};
+    </script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="/static/js/admin_mqtt.js"></script>
+    {% block admin_scripts %}{% endblock %}
+    <script>lucide.createIcons();</script>
+</body>
+</html>

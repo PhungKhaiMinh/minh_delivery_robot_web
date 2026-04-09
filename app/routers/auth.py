@@ -73,14 +73,18 @@ async def api_login(
                 content={"success": False, "message": error},
             )
 
+        redirect_url = "/admin" if profile.role == "admin" else "/dashboard"
+
         response = JSONResponse(
             content={
                 "success": True,
                 "message": "Đăng nhập thành công",
+                "redirect": redirect_url,
                 "user": {
                     "id": profile.id,
                     "name": profile.name,
                     "email": profile.email,
+                    "role": profile.role,
                 },
             }
         )
@@ -130,6 +134,7 @@ async def api_get_me(request: Request):
                 "name": user.name,
                 "email": user.email,
                 "phone": user.phone,
+                "role": user.role,
                 "created_at": user.created_at,
             },
         }

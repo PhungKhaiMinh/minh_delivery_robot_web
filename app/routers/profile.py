@@ -26,6 +26,7 @@ async def api_get_profile(request: Request):
             "name": user.name,
             "email": user.email,
             "phone": user.phone,
+            "role": user.role,
             "created_at": user.created_at,
         },
     })

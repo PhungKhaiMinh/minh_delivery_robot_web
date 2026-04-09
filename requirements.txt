@@ -3,8 +3,10 @@ uvicorn[standard]
 jinja2
 python-multipart
 pydantic[email]
-passlib[bcrypt]
+bcrypt>=4.0.0
 python-jose[cryptography]
 httpx
 websockets
+paho-mqtt>=1.6.1,<2.0.0
 aiofiles
+firebase-admin>=6.5.0

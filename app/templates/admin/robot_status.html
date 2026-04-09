@@ -1,0 +1,413 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Robot Status — Admin{% endblock %}
+
+{% block admin_content %}
+{# tojson trong x-data="..." sẽ làm vỡ thuộc tính HTML vì dấu " — dùng x-data='...' + một object #}
+{% set robot_status_cfg = {
+    "wsUrl": mqtt_ws_url,
+    "clientPrefix": mqtt_client_prefix,
+    "topicsMap": robot_status_ugv_topics,
+    "mqttUser": mqtt_username,
+    "mqttPass": mqtt_password,
+    "originLat": campus_origin_lat,
+    "originLon": campus_origin_lon,
+    "originAlt": campus_origin_alt,
+} %}
+<div
+    class="max-w-7xl mx-auto space-y-6"
+    x-data='robotTelemetryPage({{ robot_status_cfg|tojson }})'
+>
+    <div>
+        <h1 class="text-2xl font-bold text-slate-900">Robot Status</h1>
+        <p class="text-sm text-slate-500 mt-1">
+            MQTT WebSocket <code class="text-xs bg-slate-200 px-1 rounded">{{ mqtt_ws_url }}</code>
+            — đăng ký nhiều topic UGV (JSON). User: <code class="text-xs bg-slate-200 px-1 rounded">{{ mqtt_username }}</code>.
+            Nếu không kết nối được, kiểm tra broker đã bật listener <strong>WebSocket</strong> (thường khác cổng TCP 1883).
+        </p>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-3">
+        <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
+            :class="{
+                'bg-emerald-100 text-emerald-800': conn === 'connected',
+                'bg-amber-100 text-amber-800': conn === 'reconnecting',
+                'bg-slate-200 text-slate-700': conn === 'disconnected',
+                'bg-red-100 text-red-800': conn === 'error',
+            }">
+            <span class="w-2 h-2 rounded-full" :class="conn === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'"></span>
+            <span x-text="connLabel"></span>
+        </span>
+        <span class="text-xs text-slate-500" x-show="lastMsgAt">Cập nhật: <span x-text="lastMsgAt"></span></span>
+        <span class="text-xs text-red-600" x-show="errDetail" x-text="errDetail"></span>
+    </div>
+
+    <!-- GPS -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+        <h2 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+            <i data-lucide="map-pin" class="w-4 h-4 text-sky-600"></i> GPS
+            <span class="text-xs font-normal text-slate-400">UGV/position/gps</span>
+            <span class="text-xs font-normal text-slate-400">· mode từ UGV/state/gps</span>
+        </h2>
+        <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div>
+                <p class="text-xs font-medium text-slate-500">Chế độ tín hiệu</p>
+                <p class="mt-1">
+                    <span x-show="gpsMode == null" class="text-slate-400">—</span>
+                    <span x-show="gpsMode != null"
+                        class="inline-flex px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wide"
+                        :class="gpsModeClass"
+                        x-text="gpsModeLabel"></span>
+                </p>
+            </div>
+            <div>
+                <p class="text-xs font-medium text-slate-500">Vĩ độ (lat)</p>
+                <p class="mt-1 font-mono text-lg font-semibold text-slate-900" x-text="lat != null ? lat.toFixed(4) : '—'"></p>
+            </div>
+            <div>
+                <p class="text-xs font-medium text-slate-500">Kinh độ (lon)</p>
+                <p class="mt-1 font-mono text-lg font-semibold text-slate-900" x-text="lon != null ? lon.toFixed(4) : '—'"></p>
+            </div>
+            <div>
+                <p class="text-xs font-medium text-slate-500">X <span class="text-slate-400">(East, m)</span></p>
+                <p class="mt-1 font-mono text-lg font-semibold text-sky-700" x-text="localX != null ? localX : '—'"></p>
+            </div>
+            <div>
+                <p class="text-xs font-medium text-slate-500">Y <span class="text-slate-400">(North, m)</span></p>
+                <p class="mt-1 font-mono text-lg font-semibold text-sky-700" x-text="localY != null ? localY : '—'"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- IMU heading -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Heading (IMU yaw)</h2>
+            <p class="text-xs text-slate-400 mb-1">UGV/position/heading</p>
+            <p class="text-3xl font-bold text-violet-700 font-mono" x-text="yaw != null ? (yaw.toFixed(4) + ' rad') : '—'"></p>
+        </div>
+    </div>
+
+    <!-- Tốc độ thực tế / điều khiển -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm border-l-4 border-l-sky-500">
+            <h2 class="text-sm font-bold text-slate-800 mb-3">Tốc độ bánh thực tế</h2>
+            <p class="text-xs text-slate-400 mb-4">UGV/control/curr_vel — <code>left</code>, <code>right</code></p>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <p class="text-xs font-medium text-slate-500">Trái</p>
+                    <p class="mt-1 text-2xl font-bold text-slate-900 font-mono" x-text="velRealLeft != null ? velRealLeft : '—'"></p>
+                </div>
+                <div>
+                    <p class="text-xs font-medium text-slate-500">Phải</p>
+                    <p class="mt-1 text-2xl font-bold text-slate-900 font-mono" x-text="velRealRight != null ? velRealRight : '—'"></p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm border-l-4 border-l-fuchsia-500">
+            <h2 class="text-sm font-bold text-slate-800 mb-3">Tốc độ điều khiển động cơ</h2>
+            <p class="text-xs text-slate-400 mb-4">UGV/control/vel — <code>left</code>, <code>right</code></p>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <p class="text-xs font-medium text-slate-500">Trái</p>
+                    <p class="mt-1 text-2xl font-bold text-slate-900 font-mono" x-text="velCtrlLeft != null ? velCtrlLeft : '—'"></p>
+                </div>
+                <div>
+                    <p class="text-xs font-medium text-slate-500">Phải</p>
+                    <p class="mt-1 text-2xl font-bold text-slate-900 font-mono" x-text="velCtrlRight != null ? velCtrlRight : '—'"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Byte/s hai STM -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">STM cảm biến — byte/s</h2>
+            <p class="text-xs text-slate-400 mb-2">UGV/bytePerSecond — <code>byte_sensor</code></p>
+            <p class="text-3xl font-bold text-amber-700 font-mono" x-text="byteSensor != null ? byteSensor : '—'"></p>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">STM encoder — byte/s</h2>
+            <p class="text-xs text-slate-400 mb-2">UGV/bytePerSecond — <code>byte_vel</code></p>
+            <p class="text-3xl font-bold text-teal-700 font-mono" x-text="byteVel != null ? byteVel : '—'"></p>
+        </div>
+    </div>
+
+    <!-- Khóa, di chuyển, đến điểm -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Ổ khóa</h2>
+            <p class="text-xs text-slate-400 mb-2">UGV/status/has_locked — <code>lock</code></p>
+            <p class="text-lg font-semibold" :class="locked === true ? 'text-rose-600' : (locked === false ? 'text-emerald-600' : 'text-slate-500')" x-text="lockLabel"></p>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Trạng thái di chuyển</h2>
+            <p class="text-xs text-slate-400 mb-2">UGV/status/has_moving</p>
+            <p class="text-lg font-bold" :class="hasMoving === true ? 'text-sky-700' : (hasMoving === false ? 'text-slate-600' : 'text-slate-500')" x-text="movingLabel"></p>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Đến điểm</h2>
+            <p class="text-xs text-slate-400 mb-2">UGV/status/arrial — <code>has_arrial</code></p>
+            <p class="text-lg font-bold" :class="hasArrival === true ? 'text-emerald-700' : (hasArrival === false ? 'text-slate-600' : 'text-slate-500')" x-text="arrivalLabel"></p>
+        </div>
+    </div>
+
+    <!-- Tham số điều khiển -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+        <h2 class="text-sm font-bold text-slate-800 mb-2">UGV/control/para</h2>
+        <p class="text-xs text-slate-500 mb-3">Payload JSON gần nhất (theo firmware).</p>
+        <pre class="text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-x-auto whitespace-pre-wrap min-h-[4rem]" x-text="paraJson || '—'"></pre>
+    </div>
+
+    <details class="text-xs text-slate-500 bg-slate-50 rounded-xl p-4 border border-slate-200">
+        <summary class="cursor-pointer font-medium text-slate-700">Danh sách topic đã đăng ký</summary>
+        <ul class="mt-3 space-y-1 font-mono text-[11px] list-none pl-0">
+            {% for key, path in robot_status_ugv_topics.items() %}
+            <li><span class="text-slate-400">{{ key }}:</span> {{ path }}</li>
+            {% endfor %}
+        </ul>
+    </details>
+</div>
+
+<script>
+(function () {
+    /* ── ECEF→ENU converter (WGS84) — same algorithm as pathfinding_service.py ── */
+    var WGS84_A = 6378137.0;
+    var WGS84_E_SQ = 6.69437999014e-3;
+
+    function createEnuConverter(refLat, refLon, refAlt) {
+        var latR = refLat * Math.PI / 180;
+        var lonR = refLon * Math.PI / 180;
+        var sinLat = Math.sin(latR), cosLat = Math.cos(latR);
+        var sinLon = Math.sin(lonR), cosLon = Math.cos(lonR);
+        var Nref = WGS84_A / Math.sqrt(1 - WGS84_E_SQ * sinLat * sinLat);
+        var refX = (Nref + refAlt) * cosLat * cosLon;
+        var refY = (Nref + refAlt) * cosLat * sinLon;
+        var refZ = (Nref * (1 - WGS84_E_SQ) + refAlt) * sinLat;
+
+        return function (lat, lon, alt) {
+            alt = alt || 0;
+            var lr = lat * Math.PI / 180;
+            var lo = lon * Math.PI / 180;
+            var sla = Math.sin(lr), cla = Math.cos(lr);
+            var slo = Math.sin(lo), clo = Math.cos(lo);
+            var Np = WGS84_A / Math.sqrt(1 - WGS84_E_SQ * sla * sla);
+            var px = (Np + alt) * cla * clo;
+            var py = (Np + alt) * cla * slo;
+            var pz = (Np * (1 - WGS84_E_SQ) + alt) * sla;
+            var dx = px - refX, dy = py - refY, dz = pz - refZ;
+            var east  = -sinLon * dx + cosLon * dy;
+            var north = -sinLat * cosLon * dx - sinLat * sinLon * dy + cosLat * dz;
+            return { x: Math.round(east * 1000) / 1000, y: Math.round(north * 1000) / 1000 };
+        };
+    }
+
+    function pickNum() {
+        for (let i = 0; i < arguments.length; i++) {
+            const v = arguments[i];
+            if (v != null && v !== '' && !Number.isNaN(Number(v))) return Number(v);
+        }
+        return null;
+    }
+
+    function normalizeGpsMode(raw) {
+        if (raw == null) return null;
+        let mode = String(raw).trim();
+        const ml = mode.toLowerCase();
+        if (ml === '1' || ml === 'low' || ml === 'thấp') return 'Low';
+        if (ml === '2' || ml === 'medium' || ml === 'tb' || ml === 'trung bình') return 'Medium';
+        if (ml === '3' || ml === 'high' || ml === 'cao') return 'High';
+        if (mode) return mode.charAt(0).toUpperCase() + mode.slice(1).toLowerCase();
+        return null;
+    }
+
+    function invertTopicMap(m) {
+        const inv = {};
+        if (!m || typeof m !== 'object') return inv;
+        Object.keys(m).forEach(function (k) {
+            inv[m[k]] = k;
+        });
+        return inv;
+    }
+
+    function robotTelemetryPage(cfg) {
+        cfg = cfg || {};
+        const wsUrl = cfg.wsUrl || '';
+        const clientPrefix = cfg.clientPrefix || '';
+        const topicsMap = cfg.topicsMap || {};
+        const mqttUser = cfg.mqttUser;
+        const mqttPass = cfg.mqttPass;
+        const gpsToLocal = createEnuConverter(
+            cfg.originLat || 0, cfg.originLon || 0, cfg.originAlt || 0
+        );
+
+        return {
+            conn: 'disconnected',
+            connLabel: 'Chưa kết nối',
+            errDetail: '',
+            lastMsgAt: '',
+            gpsMode: null,
+            lat: null,
+            lon: null,
+            localX: null,
+            localY: null,
+            yaw: null,
+            velRealLeft: null,
+            velRealRight: null,
+            velCtrlLeft: null,
+            velCtrlRight: null,
+            byteSensor: null,
+            byteVel: null,
+            locked: null,
+            hasMoving: null,
+            hasArrival: null,
+            paraJson: '',
+            _client: null,
+            _topicToKey: {},
+
+            get gpsModeLabel() {
+                if (this.gpsMode == null) return '—';
+                return 'mode_gps = ' + this.gpsMode;
+            },
+            get gpsModeClass() {
+                var m = Number(this.gpsMode);
+                if (m === 1) return 'bg-amber-100 text-amber-900';
+                if (m === 2) return 'bg-sky-100 text-sky-900';
+                if (m >= 3) return 'bg-emerald-100 text-emerald-900';
+                return 'bg-slate-200 text-slate-800';
+            },
+            get lockLabel() {
+                if (this.locked === null || this.locked === undefined) return '—';
+                return this.locked ? 'Đã khóa' : 'Mở khóa';
+            },
+            get movingLabel() {
+                if (this.hasMoving === null || this.hasMoving === undefined) return '—';
+                return this.hasMoving ? 'Đang di chuyển' : 'Đứng yên';
+            },
+            get arrivalLabel() {
+                if (this.hasArrival === null || this.hasArrival === undefined) return '—';
+                return this.hasArrival ? 'Đã đến điểm' : 'Chưa đến điểm';
+            },
+
+            applyMessage(key, o) {
+                if (!o || typeof o !== 'object') return;
+                const self = this;
+                const touch = function () {
+                    self.lastMsgAt = new Date().toLocaleTimeString('vi-VN');
+                };
+
+                switch (key) {
+                    case 'state_gps':
+                        var modeVal = pickNum(o.mode_gps);
+                        this.gpsMode = modeVal != null ? String(modeVal) : null;
+                        touch();
+                        break;
+                    case 'gps':
+                        this.lat = pickNum(o.lat, o.latitude);
+                        this.lon = pickNum(o.lon, o.lng, o.longitude);
+                        if (this.lat != null && this.lon != null) {
+                            var enu = gpsToLocal(this.lat, this.lon);
+                            this.localX = enu.x;
+                            this.localY = enu.y;
+                        } else {
+                            this.localX = null;
+                            this.localY = null;
+                        }
+                        touch();
+                        break;
+                    case 'heading':
+                        this.yaw = pickNum(o.heading, o.yaw);
+                        touch();
+                        break;
+                    case 'curr_vel':
+                        this.velRealLeft = pickNum(o.left, o.left_vel, o.real_vel && o.real_vel.left_vel);
+                        this.velRealRight = pickNum(o.right, o.right_vel, o.real_vel && o.real_vel.right_vel);
+                        touch();
+                        break;
+                    case 'vel':
+                        this.velCtrlLeft = pickNum(o.left, o.left_vel, o.control_vel && o.control_vel.left_vel);
+                        this.velCtrlRight = pickNum(o.right, o.right_vel, o.control_vel && o.control_vel.right_vel);
+                        touch();
+                        break;
+                    case 'para':
+                        try {
+                            this.paraJson = JSON.stringify(o, null, 2);
+                        } catch (e) {
+                            this.paraJson = String(o);
+                        }
+                        touch();
+                        break;
+                    case 'byte_per_sec':
+                        this.byteSensor = pickNum(o.byte_sensor, o.byte_yaw);
+                        this.byteVel = pickNum(o.byte_vel);
+                        touch();
+                        break;
+                    case 'has_locked':
+                        if (o.lock !== undefined) this.locked = Boolean(o.lock);
+                        else if (o.has_locked !== undefined) this.locked = Boolean(o.has_locked);
+                        touch();
+                        break;
+                    case 'has_moving':
+                        if (o.has_moving !== undefined) this.hasMoving = Boolean(o.has_moving);
+                        touch();
+                        break;
+                    case 'arrival':
+                        if (o.has_arrial !== undefined) this.hasArrival = Boolean(o.has_arrial);
+                        else if (o.has_arrival !== undefined) this.hasArrival = Boolean(o.has_arrival);
+                        touch();
+                        break;
+                    default:
+                        break;
+                }
+            },
+
+            init() {
+                const self = this;
+                this._topicToKey = invertTopicMap(topicsMap);
+                const pendingUpdates = {};
+
+                setInterval(function () {
+                    const keys = Object.keys(pendingUpdates);
+                    if (keys.length === 0) return;
+                    keys.forEach(function (k) {
+                        self.applyMessage(k, pendingUpdates[k]);
+                        delete pendingUpdates[k];
+                    });
+                }, 100);
+
+                this._client = window.AdminMqtt.connect(wsUrl, clientPrefix, function (state, detail) {
+                    self.conn = state;
+                    self.errDetail = detail || '';
+                    const labels = { connected: 'Đã kết nối MQTT', disconnected: 'Mất kết nối', reconnecting: 'Đang kết nối lại…', error: 'Lỗi' };
+                    self.connLabel = labels[state] || state;
+                    if (state === 'connected' && self._client && topicsMap) {
+                        Object.keys(topicsMap).forEach(function (k) {
+                            const t = topicsMap[k];
+                            if (t) self._client.subscribe(t, { qos: 0 });
+                        });
+                    }
+                });
+
+                if (this._client) {
+                    this._client.on('message', function (t, msg) {
+                        const key = self._topicToKey[t];
+                        if (!key) return;
+                        const raw = msg.toString();
+                        const o = window.AdminMqtt.safeParseJson(raw);
+                        if (!o) {
+                            const n = Number(String(raw).trim());
+                            if (!Number.isNaN(n) && key === 'heading') {
+                                pendingUpdates[key] = { heading: n };
+                            }
+                            return;
+                        }
+                        pendingUpdates[key] = o;
+                    });
+                }
+            },
+        };
+    }
+    window.robotTelemetryPage = robotTelemetryPage;
+})();
+</script>
+{% endblock %}

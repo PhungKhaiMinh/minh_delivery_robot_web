@@ -1,0 +1,264 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Settings — Admin{% endblock %}
+
+{% block admin_content %}
+{% set settings_cfg = {
+    "wsUrl": mqtt_ws_url,
+    "clientPrefix": mqtt_client_prefix,
+    "mqttUser": mqtt_username,
+    "mqttPass": mqtt_password,
+    "topicVel": "UGV/Control",
+    "topicCalibHeading": "UGV/offset/calib_heading",
+} %}
+<div class="max-w-xl mx-auto space-y-8" x-data='adminSettings({{ settings_cfg|tojson }})'>
+    <div>
+        <h1 class="text-2xl font-bold text-slate-900">Settings</h1>
+        <p class="text-sm text-slate-500 mt-1">
+            Chọn chế độ điều khiển robot và (ở chế độ thủ công) nhập tốc độ bánh. Payload JSON được gửi tới topic MQTT bên dưới để firmware robot đọc.
+        </p>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-3">
+        <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
+            :class="{
+                'bg-emerald-100 text-emerald-800': conn === 'connected',
+                'bg-amber-100 text-amber-800': conn === 'reconnecting',
+                'bg-slate-200 text-slate-700': conn === 'disconnected',
+                'bg-red-100 text-red-800': conn === 'error',
+            }">
+            <span class="w-2 h-2 rounded-full" :class="conn === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'"></span>
+            <span x-text="connLabel"></span>
+        </span>
+        <span class="text-xs text-slate-500">Vel: <code class="bg-slate-200 px-1 rounded" x-text="topicVel"></code></span>
+        <span class="text-xs text-slate-500">Calib: <code class="bg-slate-200 px-1 rounded" x-text="topicCalibHeading"></code></span>
+    </div>
+    <p class="text-xs text-red-600 min-h-[1rem]" x-show="publishError" x-text="publishError"></p>
+
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-6">
+        <div>
+            <p class="text-sm font-semibold text-slate-800 mb-3">Chế độ điều khiển</p>
+            <div class="flex rounded-xl border border-slate-200 p-1 bg-slate-50">
+                <button
+                    type="button"
+                    @click="mode = 'auto'"
+                    :class="mode === 'auto' ? 'bg-white shadow text-slate-900 font-semibold' : 'text-slate-500 hover:text-slate-800'"
+                    class="flex-1 py-2.5 rounded-lg text-sm transition-all"
+                >Tự động (Auto)</button>
+                <button
+                    type="button"
+                    @click="mode = 'manual'"
+                    :class="mode === 'manual' ? 'bg-white shadow text-slate-900 font-semibold' : 'text-slate-500 hover:text-slate-800'"
+                    class="flex-1 py-2.5 rounded-lg text-sm transition-all"
+                >Thủ công (Manual)</button>
+            </div>
+            <p class="text-xs text-slate-500 mt-2">Auto: robot chạy theo lộ trình / stack điều khiển của bạn. Manual: dùng tốc độ bánh và calib IMU bên dưới.</p>
+        </div>
+
+        <div class="space-y-4" :class="mode !== 'manual' ? 'opacity-50 pointer-events-none' : ''">
+            <p class="text-sm font-semibold text-slate-800">Tốc độ bánh (chỉ khi Manual)</p>
+            <p class="text-xs text-slate-500 -mt-2">Đơn vị do firmware quy ước (ví dụ RPM, duty %, m/s). Nhập số âm nếu robot hỗ trợ lùi.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <label class="block">
+                    <span class="text-xs font-medium text-slate-600">Bánh trái (left_vel)</span>
+                    <input
+                        type="number"
+                        step="any"
+                        x-model.number="wheelLeft"
+                        :disabled="mode !== 'manual' || conn !== 'connected'"
+                        class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-900 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 disabled:bg-slate-100"
+                        placeholder="0"
+                    />
+                </label>
+                <label class="block">
+                    <span class="text-xs font-medium text-slate-600">Bánh phải (right_vel)</span>
+                    <input
+                        type="number"
+                        step="any"
+                        x-model.number="wheelRight"
+                        :disabled="mode !== 'manual' || conn !== 'connected'"
+                        class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-900 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 disabled:bg-slate-100"
+                        placeholder="0"
+                    />
+                </label>
+            </div>
+            <button
+                type="button"
+                @click="publishVel()"
+                :disabled="mode !== 'manual' || conn !== 'connected' || publishing"
+                class="w-full sm:w-auto px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-sky-600 hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+                <span x-show="!publishing">Gửi lệnh điều khiển</span>
+                <span x-show="publishing">Đang gửi…</span>
+            </button>
+            <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="lastOk" x-text="lastOk"></p>
+
+            <!-- Calib heading IMU (inside Manual block) -->
+            <div class="border-t border-slate-200 pt-4 mt-2 space-y-3">
+                <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span>
+                    Calib góc Yaw (IMU)
+                </p>
+                <p class="text-xs text-slate-500">
+                    Gửi giá trị offset góc yaw lên <code class="bg-slate-200 px-1 rounded">UGV/offset/calib_heading</code>
+                    — firmware dùng giá trị này để calib heading IMU.
+                </p>
+                <div class="flex flex-col sm:flex-row items-start sm:items-end gap-4">
+                    <label class="block flex-1 w-full sm:w-auto">
+                        <span class="text-xs font-medium text-slate-600">Giá trị calib (float, rad)</span>
+                        <input
+                            type="number"
+                            step="any"
+                            x-model.number="calibHeading"
+                            :disabled="mode !== 'manual' || conn !== 'connected'"
+                            class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-900 font-mono focus:ring-2 focus:ring-violet-500 focus:border-violet-500 disabled:bg-slate-100"
+                            placeholder="0.0"
+                        />
+                    </label>
+                    <button
+                        type="button"
+                        @click="publishCalib()"
+                        :disabled="mode !== 'manual' || conn !== 'connected' || publishingCalib"
+                        class="shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <span x-show="!publishingCalib">Gửi Calib</span>
+                        <span x-show="publishingCalib">Đang gửi…</span>
+                    </button>
+                </div>
+                <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="calibOk" x-text="calibOk"></p>
+                <p class="text-xs text-red-600 min-h-[1rem]" x-show="calibError" x-text="calibError"></p>
+            </div>
+        </div>
+    </div>
+
+    <details class="text-xs text-slate-500 bg-slate-50 rounded-xl p-4 border border-slate-200">
+        <summary class="cursor-pointer font-medium text-slate-700">Payload JSON mẫu</summary>
+        <pre class="mt-3 overflow-x-auto text-[11px] leading-relaxed"><span class="text-slate-400">// UGV/Control</span>
+{
+  "manual_mode": true,
+  "left_vel": 120,
+  "right_vel": 118
+}
+
+<span class="text-slate-400">// UGV/offset/calib_heading</span>
+{
+  "calib": 0.157
+}</pre>
+    </details>
+</div>
+
+<script>
+function adminSettings(cfg) {
+    cfg = cfg || {};
+    var wsUrl = cfg.wsUrl;
+    var clientPrefix = cfg.clientPrefix;
+    var mqttUser = cfg.mqttUser;
+    var mqttPass = cfg.mqttPass;
+    var topicVel = cfg.topicVel || 'UGV/Control';
+    var topicCalibHeading = cfg.topicCalibHeading || 'UGV/offset/calib_heading';
+
+    return {
+        topicVel: topicVel,
+        topicCalibHeading: topicCalibHeading,
+        mode: 'auto',
+        wheelLeft: 0,
+        wheelRight: 0,
+        calibHeading: 0,
+        conn: 'disconnected',
+        connLabel: 'Chưa kết nối',
+        publishError: '',
+        lastOk: '',
+        publishing: false,
+        publishingCalib: false,
+        calibOk: '',
+        calibError: '',
+        _client: null,
+        _debounce: null,
+
+        init() {
+            var self = this;
+            this._client = window.AdminMqtt.connect(wsUrl, clientPrefix, function (state, detail) {
+                self.conn = state;
+                self.publishError = detail || '';
+                var labels = {
+                    connected: 'MQTT đã kết nối',
+                    disconnected: 'Chưa kết nối broker',
+                    reconnecting: 'Đang kết nối…',
+                    error: 'Lỗi MQTT',
+                };
+                self.connLabel = labels[state] || state;
+            }, { username: mqttUser || undefined, password: mqttPass !== undefined && mqttPass !== null ? mqttPass : undefined });
+
+            this.$watch('mode', function () {
+                self.publishVel();
+            });
+
+            this.$watch('wheelLeft', function () {
+                if (self.mode === 'manual') self._scheduleVel();
+            });
+
+            this.$watch('wheelRight', function () {
+                if (self.mode === 'manual') self._scheduleVel();
+            });
+        },
+
+        _scheduleVel() {
+            var self = this;
+            if (this._debounce) clearTimeout(this._debounce);
+            this._debounce = setTimeout(function () {
+                self.publishVel();
+            }, 300);
+        },
+
+        publishVel() {
+            if (!this._client || this.conn !== 'connected') return;
+            var self = this;
+            this.publishing = true;
+            var payload = {
+                manual_mode: this.mode === 'manual',
+                left_vel: Number(this.wheelLeft) || 0,
+                right_vel: Number(this.wheelRight) || 0,
+            };
+            var body = JSON.stringify(payload);
+            try {
+                this._client.publish(topicVel, body, { qos: 1 }, function (err) {
+                    self.publishing = false;
+                    if (err) {
+                        self.publishError = err.message || 'Publish thất bại';
+                        self.lastOk = '';
+                    } else {
+                        self.publishError = '';
+                        self.lastOk = 'Đã gửi → ' + topicVel + ': ' + body;
+                    }
+                });
+            } catch (e) {
+                this.publishing = false;
+                this.publishError = String(e);
+            }
+        },
+
+        publishCalib() {
+            if (!this._client || this.conn !== 'connected') return;
+            var self = this;
+            this.publishingCalib = true;
+            this.calibError = '';
+            this.calibOk = '';
+            var val = parseFloat(this.calibHeading) || 0.0;
+            var body = '{"calib":' + val.toFixed(6) + '}';
+            try {
+                this._client.publish(topicCalibHeading, body, { qos: 1 }, function (err) {
+                    self.publishingCalib = false;
+                    if (err) {
+                        self.calibError = err.message || 'Publish thất bại';
+                    } else {
+                        self.calibOk = 'Đã gửi → ' + topicCalibHeading + ': ' + body;
+                    }
+                });
+            } catch (e) {
+                this.publishingCalib = false;
+                self.calibError = String(e);
+            }
+        },
+    };
+}
+</script>
+{% endblock %}

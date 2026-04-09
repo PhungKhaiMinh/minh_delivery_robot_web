@@ -1,0 +1,91 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Emergency — Admin{% endblock %}
+
+{% block admin_content %}
+{% set emerg_cfg = {"wsUrl": mqtt_ws_url, "clientPrefix": mqtt_client_prefix, "topic": mqtt_topic_command, "mqttUser": mqtt_username, "mqttPass": mqtt_password} %}
+<div class="max-w-lg mx-auto space-y-8" x-data='adminEmergency({{ emerg_cfg|tojson }})'>
+    <div class="text-center">
+        <h1 class="text-2xl font-bold text-slate-900">Emergency Stop</h1>
+        <p class="text-sm text-slate-500 mt-2">Gửi lệnh dừng khẩn cấp tới robot qua MQTT</p>
+    </div>
+
+    <div class="flex flex-wrap justify-center gap-3">
+        <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
+            :class="{
+                'bg-emerald-100 text-emerald-800': conn === 'connected',
+                'bg-amber-100 text-amber-800': conn === 'reconnecting',
+                'bg-slate-200 text-slate-700': conn === 'disconnected',
+                'bg-red-100 text-red-800': conn === 'error',
+            }">
+            <span class="w-2 h-2 rounded-full" :class="conn === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+            <span x-text="connLabel"></span>
+        </span>
+    </div>
+    <p class="text-center text-xs text-red-600 min-h-[1rem]" x-show="errDetail" x-text="errDetail"></p>
+
+    <div class="flex flex-col items-center gap-4">
+        <button
+            type="button"
+            @click="sendStop()"
+            :disabled="conn !== 'connected' || sending"
+            class="w-full max-w-sm py-6 rounded-2xl text-xl font-black text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-red-600/30 border-4 border-red-800 ring-4 ring-red-200 transition-transform active:scale-[0.98]"
+        >
+            <span x-show="!sending">STOP</span>
+            <span x-show="sending">Đang gửi…</span>
+        </button>
+        <p class="text-xs text-slate-500 text-center">Topic: <code x-text="topic"></code> — payload: chuỗi <code>STOP</code> hoặc JSON <code>{"cmd":"STOP"}</code></p>
+        <p class="text-sm text-emerald-700 font-medium min-h-[1.25rem]" x-show="lastOk" x-text="lastOk"></p>
+    </div>
+</div>
+
+<script>
+function adminEmergency(cfg) {
+    cfg = cfg || {};
+    const wsUrl = cfg.wsUrl;
+    const clientPrefix = cfg.clientPrefix;
+    const topic = cfg.topic;
+    const mqttUser = cfg.mqttUser;
+    const mqttPass = cfg.mqttPass;
+    return {
+        topic: topic,
+        conn: 'disconnected',
+        connLabel: 'Chưa kết nối',
+        errDetail: '',
+        sending: false,
+        lastOk: '',
+        _client: null,
+        init() {
+            const self = this;
+            this._client = window.AdminMqtt.connect(wsUrl, clientPrefix, function (state, detail) {
+                self.conn = state;
+                self.errDetail = detail || '';
+                const labels = { connected: 'Sẵn sàng gửi lệnh', disconnected: 'Chưa kết nối broker', reconnecting: 'Đang kết nối…', error: 'Lỗi MQTT' };
+                self.connLabel = labels[state] || state;
+            }, { username: mqttUser || undefined, password: mqttPass !== undefined && mqttPass !== null ? mqttPass : undefined });
+        },
+        sendStop() {
+            if (!this._client || this.conn !== 'connected') return;
+            this.sending = true;
+            this.lastOk = '';
+            const self = this;
+            try {
+                this._client.publish(topic, 'STOP', { qos: 1 }, function (err) {
+                    self.sending = false;
+                    if (err) {
+                        self.lastOk = '';
+                        self.errDetail = err.message || 'Publish thất bại';
+                    } else {
+                        self.errDetail = '';
+                        self.lastOk = 'Đã gửi STOP';
+                        if (window.showToast) showToast('Đã gửi STOP tới robot', 'warning');
+                    }
+                });
+            } catch (e) {
+                this.sending = false;
+                self.errDetail = String(e);
+            }
+        },
+    };
+}
+</script>
+{% endblock %}

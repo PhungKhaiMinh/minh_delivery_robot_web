@@ -4,8 +4,10 @@ Sử dụng Pydantic để validation input nghiêm ngặt.
 """
 
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional
+from typing import Optional, Literal
 from app.config import ALLOWED_EMAIL_DOMAIN
+
+UserRole = Literal["client", "admin"]
 
 
 class UserRegister(BaseModel):
@@ -65,7 +67,15 @@ class UserProfile(BaseModel):
     name: str
     phone: str
     email: str
+    role: UserRole = "client"
     created_at: Optional[str] = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def normalize_role(cls, v: object) -> str:
+        if v == "admin":
+            return "admin"
+        return "client"
 
 
 class UserUpdate(BaseModel):

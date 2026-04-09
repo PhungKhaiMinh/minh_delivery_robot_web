@@ -1,0 +1,53 @@
+{# Sidebar admin — desktop + mobile drawer #}
+<aside
+    class="fixed md:static inset-y-0 left-0 z-50 w-64 bg-slate-900 text-slate-100 flex flex-col border-r border-slate-800 transform transition-transform duration-200 -translate-x-full md:translate-x-0"
+    :class="mobileNav ? 'translate-x-0' : ''"
+>
+    <div class="p-5 border-b border-slate-800 flex items-center justify-between gap-2">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-sky-500/20 flex items-center justify-center flex-shrink-0">
+                <i data-lucide="shield-check" class="w-5 h-5 text-sky-400"></i>
+            </div>
+            <div class="min-w-0">
+                <p class="font-bold text-white truncate">BK BookBot</p>
+                <p class="text-xs text-slate-400">Admin Console</p>
+            </div>
+        </div>
+        <button type="button" class="md:hidden p-1 rounded text-slate-400 hover:text-white" @click="mobileNav = false" aria-label="Đóng">
+            <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+    </div>
+
+    <nav class="flex-1 p-3 space-y-1 overflow-y-auto">
+        {% set nav = [
+            ('orders', 'package', 'Orders', '/admin/orders'),
+            ('robot', 'cpu', 'Robot Status', '/admin/robot'),
+            ('tracking', 'map', 'Tracking', '/admin/tracking'),
+            ('plotting', 'line-chart', 'Plotting', '/admin/plotting'),
+            ('settings', 'settings', 'Settings', '/admin/settings'),
+            ('emergency', 'alert-octagon', 'Emergency', '/admin/emergency'),
+        ] %}
+        {% for key, icon, label, href in nav %}
+        <a
+            href="{{ href }}"
+            class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors
+                {% if admin_page == key %}bg-sky-600 text-white shadow-lg shadow-sky-900/30{% else %}text-slate-300 hover:bg-slate-800 hover:text-white{% endif %}"
+        >
+            <i data-lucide="{{ icon }}" class="w-5 h-5 flex-shrink-0"></i>
+            {{ label }}
+        </a>
+        {% endfor %}
+    </nav>
+
+    <div class="p-3 border-t border-slate-800 space-y-1">
+        <div class="px-3 py-2 text-xs text-slate-500 truncate">{{ user.name }}</div>
+        <button
+            type="button"
+            onclick="handleLogout()"
+            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+        >
+            <i data-lucide="log-out" class="w-5 h-5"></i>
+            Đăng xuất
+        </button>
+    </div>
+</aside>

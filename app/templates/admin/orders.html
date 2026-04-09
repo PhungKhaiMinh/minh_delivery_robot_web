@@ -1,0 +1,603 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Orders — Admin{% endblock %}
+
+{% block admin_content %}
+<textarea id="orders-boot" class="hidden" aria-hidden="true">{{ bookings_json }}</textarea>
+<div class="max-w-7xl mx-auto space-y-6" x-data="adminOrdersTable()">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900">Orders</h1>
+            <p class="text-sm text-slate-500 mt-1">Đơn trạng thái Pending hoặc Shipping (pending / confirmed / in_progress)</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <span x-show="loading" class="text-sm text-sky-600 flex items-center gap-2 order-last sm:order-none w-full sm:w-auto">
+                <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                Đang tải…
+            </span>
+            <button
+                type="button"
+                @click="filterOpen = !filterOpen"
+                class="px-4 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 text-sm font-medium hover:bg-slate-50"
+                :class="filterOpen ? 'ring-2 ring-sky-500 border-sky-400' : ''"
+            >
+                Lọc dữ liệu
+            </button>
+            <button type="button" @click="refresh()" class="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800">
+                Làm mới
+            </button>
+        </div>
+    </div>
+
+    <!-- Bộ lọc -->
+    <div
+        x-show="filterOpen"
+        x-transition
+        class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 md:p-5 space-y-5"
+        style="display: none;"
+    >
+        <p class="text-sm font-semibold text-slate-800">Điều kiện lọc</p>
+        <p class="text-xs text-slate-500 -mt-3">Mỗi mục: gõ để tìm nhanh hoặc chọn từ gợi ý (danh sách theo dữ liệu hiện có).</p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            <!-- Tên người đặt -->
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium text-slate-600">Tên người đặt</label>
+                <input type="text" x-model="fName" list="adm-dl-name" autocomplete="off"
+                    class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Gõ hoặc chọn từ danh sách…">
+                <datalist id="adm-dl-name">
+                    <template x-for="opt in uniqueList('name')" :key="opt">
+                        <option :value="opt"></option>
+                    </template>
+                </datalist>
+            </div>
+
+            <!-- Thời gian trả — đồng hồ 12h + gợi ý -->
+            <div class="space-y-2 sm:col-span-2 lg:col-span-1">
+                <label class="block text-xs font-medium text-slate-600">Thời gian trả sách</label>
+                <div class="flex flex-wrap items-center gap-2">
+                    <select x-model="timeH" @change="timeFilterEnabled = true"
+                        class="px-2 py-2 rounded-lg border border-slate-200 text-sm bg-white min-w-[4.5rem]">
+                        <template x-for="h in hours12()" :key="h">
+                            <option :value="h" x-text="h"></option>
+                        </template>
+                    </select>
+                    <span class="text-slate-400">:</span>
+                    <select x-model="timeM" @change="timeFilterEnabled = true"
+                        class="px-2 py-2 rounded-lg border border-slate-200 text-sm bg-white min-w-[4.5rem]">
+                        <template x-for="m in minutes60()" :key="m">
+                            <option :value="m" x-text="m"></option>
+                        </template>
+                    </select>
+                    <select x-model="timeAP" @change="timeFilterEnabled = true"
+                        class="px-2 py-2 rounded-lg border border-slate-200 text-sm bg-white min-w-[5.5rem]">
+                        <option value="AM">AM</option>
+                        <option value="PM">PM</option>
+                    </select>
+                    <button type="button" @click="clearTimeFilter()" class="text-xs text-sky-700 hover:underline px-1">Bỏ lọc giờ</button>
+                </div>
+                <p class="text-[11px] text-slate-500">Giờ lưu trong hệ thống dạng 24h; lọc khớp đúng khung giờ đã chọn.</p>
+                <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-1">
+                    <span class="text-[10px] text-slate-400 w-full">Chọn nhanh từ dữ liệu:</span>
+                    <template x-for="t in uniqueList('time')" :key="t">
+                        <button type="button" @click="pickQuickTime(t)"
+                            class="text-xs px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 hover:bg-sky-100 border border-slate-200"
+                            x-text="formatTimeDisplay(t)"></button>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Ngày trả — lịch + chip -->
+            <div class="space-y-2">
+                <label class="block text-xs font-medium text-slate-600">Ngày trả sách</label>
+                <input type="date" x-model="fDate" @change="dateFilterEnabled = true"
+                    class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+                <button type="button" @click="fDate = ''; dateFilterEnabled = false" class="text-xs text-sky-700 hover:underline">Bỏ lọc ngày</button>
+                <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                    <span class="text-[10px] text-slate-400 w-full">Ngày có trong đơn:</span>
+                    <template x-for="d in uniqueList('date')" :key="d">
+                        <button type="button" @click="fDate = d; dateFilterEnabled = true"
+                            class="text-xs px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 hover:bg-sky-100 border border-slate-200"
+                            x-text="d"></button>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Số lượng -->
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium text-slate-600">Số lượng sách</label>
+                <input type="text" x-model="fCount" list="adm-dl-count" inputmode="numeric" autocomplete="off"
+                    class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Gõ hoặc chọn…">
+                <datalist id="adm-dl-count">
+                    <template x-for="opt in uniqueList('count')" :key="opt">
+                        <option :value="opt"></option>
+                    </template>
+                </datalist>
+            </div>
+
+            <!-- Vị trí -->
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium text-slate-600">Vị trí</label>
+                <input type="text" x-model="fLocation" list="adm-dl-loc" autocomplete="off"
+                    class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Gõ hoặc chọn…">
+                <datalist id="adm-dl-loc">
+                    <template x-for="opt in uniqueList('location')" :key="opt">
+                        <option :value="opt"></option>
+                    </template>
+                </datalist>
+            </div>
+
+            <!-- Trạng thái -->
+            <div class="space-y-1.5">
+                <label class="block text-xs font-medium text-slate-600">Trạng thái</label>
+                <input type="text" x-model="fStatus" list="adm-dl-status" autocomplete="off"
+                    class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Gõ hoặc chọn…">
+                <datalist id="adm-dl-status">
+                    <template x-for="opt in uniqueList('status')" :key="opt">
+                        <option :value="opt"></option>
+                    </template>
+                </datalist>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+            <button type="button" @click="applyFilters()" class="px-4 py-2 rounded-xl bg-sky-600 text-white text-sm font-medium hover:bg-sky-700">
+                Áp dụng lọc
+            </button>
+            <button type="button" @click="clearFilters()" class="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50">
+                Xóa lọc
+            </button>
+        </div>
+    </div>
+
+    <div x-show="errorMsg" class="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm" x-text="errorMsg"></div>
+
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead class="bg-slate-50 text-slate-600 text-left">
+                    <tr>
+                        <th class="px-4 py-3 font-semibold">
+                            <button type="button" @click="toggleSort('customer')" class="inline-flex items-center gap-1.5 hover:text-slate-900 select-none">
+                                Người đặt
+                                <span class="text-slate-400" x-html="sortIcon('customer')"></span>
+                            </button>
+                        </th>
+                        <th class="px-4 py-3 font-semibold">
+                            <button type="button" @click="toggleSort('time')" class="inline-flex items-center gap-1.5 hover:text-slate-900 select-none">
+                                Thời gian trả sách
+                                <span class="text-slate-400" x-html="sortIcon('time')"></span>
+                            </button>
+                        </th>
+                        <th class="px-4 py-3 font-semibold">
+                            <button type="button" @click="toggleSort('date')" class="inline-flex items-center gap-1.5 hover:text-slate-900 select-none">
+                                Ngày trả
+                                <span class="text-slate-400" x-html="sortIcon('date')"></span>
+                            </button>
+                        </th>
+                        <th class="px-4 py-3 font-semibold">
+                            <button type="button" @click="toggleSort('count')" class="inline-flex items-center gap-1.5 hover:text-slate-900 select-none">
+                                Số lượng sách
+                                <span class="text-slate-400" x-html="sortIcon('count')"></span>
+                            </button>
+                        </th>
+                        <th class="px-4 py-3 font-semibold">
+                            <button type="button" @click="toggleSort('location')" class="inline-flex items-center gap-1.5 hover:text-slate-900 select-none">
+                                Vị trí
+                                <span class="text-slate-400" x-html="sortIcon('location')"></span>
+                            </button>
+                        </th>
+                        <th class="px-4 py-3 font-semibold">
+                            <button type="button" @click="toggleSort('status')" class="inline-flex items-center gap-1.5 hover:text-slate-900 select-none">
+                                Trạng thái
+                                <span class="text-slate-400" x-html="sortIcon('status')"></span>
+                            </button>
+                        </th>
+                        <th class="px-4 py-3 font-semibold text-center w-20">Xóa</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    <template x-if="displayRows.length === 0 && !loading">
+                        <tr><td colspan="7" class="px-4 py-8 text-center text-slate-500">Không có đơn nào trong hàng chờ.</td></tr>
+                    </template>
+                    <template x-for="row in displayRows" :key="row.bid">
+                        <tr class="hover:bg-slate-50/80">
+                            <td class="px-4 py-3 font-medium" x-text="row._customer_name || '—'"></td>
+                            <td class="px-4 py-3" x-text="row.pickup_time || '—'"></td>
+                            <td class="px-4 py-3" x-text="row.pickup_date || '—'"></td>
+                            <td class="px-4 py-3" x-text="row.book_count"></td>
+                            <td class="px-4 py-3 max-w-[220px] truncate" :title="row.pickup_location_name || ''" x-text="row.pickup_location_name || '—'"></td>
+                            <td class="px-4 py-3">
+                                <span
+                                    class="inline-flex px-2.5 py-1 rounded-lg text-xs font-semibold"
+                                    :class="row._admin_status_label === 'Pending' ? 'bg-amber-100 text-amber-800' : 'bg-indigo-100 text-indigo-800'"
+                                    x-text="row._admin_status_label"
+                                ></span>
+                            </td>
+                            <td class="px-4 py-3 text-center">
+                                <button type="button"
+                                    :data-bid="row.bid"
+                                    onclick="window._doDeleteOrder(this.dataset.bid)"
+                                    class="px-2 py-1 rounded-lg text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 transition-colors">
+                                    Xóa
+                                </button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════ TEST SCENARIOS ═══════════════ -->
+<div class="max-w-7xl mx-auto mt-10 space-y-4" x-data="testScenarios()">
+    <div class="flex items-center gap-3">
+        <h2 class="text-xl font-bold text-slate-900">Kịch bản kiểm tra thực địa</h2>
+        <span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold uppercase tracking-wide">Test</span>
+    </div>
+    <p class="text-sm text-slate-500">Gửi danh sách waypoints trực tiếp lên MQTT để kiểm tra xe chạy thực tế.</p>
+
+    <!-- Scenario: Football field -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                    <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                        <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
+                        Chạy quanh sân bóng đá
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-1">Robot di chuyển qua 4 góc sân bóng trong khuôn viên trường rồi quay về điểm xuất phát.</p>
+                </div>
+                <button type="button"
+                    @click="dispatch('football_field')"
+                    :disabled="running === 'football_field'"
+                    class="shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                    :class="running === 'football_field'
+                        ? 'bg-slate-200 text-slate-500 cursor-wait'
+                        : 'bg-sky-600 text-white hover:bg-sky-700 active:bg-sky-800'">
+                    <span x-show="running !== 'football_field'">Bắt đầu</span>
+                    <span x-show="running === 'football_field'" class="flex items-center gap-2">
+                        <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                        Đang gửi…
+                    </span>
+                </button>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-xs font-mono">
+                    <thead class="text-slate-500 bg-slate-50">
+                        <tr>
+                            <th class="px-3 py-2 text-left font-medium">#</th>
+                            <th class="px-3 py-2 text-left font-medium">Tên</th>
+                            <th class="px-3 py-2 text-right font-medium">Lat</th>
+                            <th class="px-3 py-2 text-right font-medium">Lon</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 text-slate-700">
+                        <tr class="bg-sky-50"><td class="px-3 py-1.5">1</td><td class="px-3 py-1.5 font-semibold">B1 (xuất phát)</td><td class="px-3 py-1.5 text-right">10.77202433</td><td class="px-3 py-1.5 text-right">106.65860867</td></tr>
+                        <tr><td class="px-3 py-1.5">2</td><td class="px-3 py-1.5">Waypoint trung gian</td><td class="px-3 py-1.5 text-right">10.77225250</td><td class="px-3 py-1.5 text-right">106.65900900</td></tr>
+                        <tr><td class="px-3 py-1.5">3</td><td class="px-3 py-1.5">Góc 3</td><td class="px-3 py-1.5 text-right">10.7721896</td><td class="px-3 py-1.5 text-right">106.6590731</td></tr>
+                        <tr><td class="px-3 py-1.5">4</td><td class="px-3 py-1.5">Góc 2</td><td class="px-3 py-1.5 text-right">10.7726199</td><td class="px-3 py-1.5 text-right">106.6598401</td></tr>
+                        <tr><td class="px-3 py-1.5">5</td><td class="px-3 py-1.5">Góc 1</td><td class="px-3 py-1.5 text-right">10.7729915</td><td class="px-3 py-1.5 text-right">106.65962716</td></tr>
+                        <tr><td class="px-3 py-1.5">6</td><td class="px-3 py-1.5">Góc 4</td><td class="px-3 py-1.5 text-right">10.7725605</td><td class="px-3 py-1.5 text-right">106.6588595</td></tr>
+                        <tr class="bg-slate-50 text-slate-400"><td class="px-3 py-1.5">7</td><td class="px-3 py-1.5">→ Quay về WP trung gian</td><td class="px-3 py-1.5 text-right">10.77225250</td><td class="px-3 py-1.5 text-right">106.65900900</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Result -->
+            <template x-if="lastResult && lastScenario === 'football_field'">
+                <div class="rounded-xl p-4 text-sm"
+                    :class="lastResult.success ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-red-50 border border-red-200 text-red-800'">
+                    <p class="font-semibold" x-text="lastResult.message"></p>
+                    <template x-if="lastResult.payload">
+                        <div class="mt-2 text-xs font-mono bg-white/60 rounded-lg p-3 overflow-x-auto">
+                            <p><span class="text-slate-500">stage_x:</span> [<span x-text="lastResult.payload.stage_x.join(', ')"></span>]</p>
+                            <p><span class="text-slate-500">stage_y:</span> [<span x-text="lastResult.payload.stage_y.join(', ')"></span>]</p>
+                        </div>
+                    </template>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>
+
+<script>
+window._doDeleteOrder = async function (id) {
+    console.log('[DELETE] id=', id);
+    if (!id) { alert('Lỗi: không tìm thấy ID đơn hàng'); return; }
+    if (!confirm('Xóa vĩnh viễn đơn hàng này?')) return;
+    try {
+        var res = await fetch('/api/admin/bookings/' + encodeURIComponent(id), {
+            method: 'DELETE', credentials: 'same-origin',
+        });
+        console.log('[DELETE] status=', res.status);
+        var data = await res.json();
+        console.log('[DELETE] response=', data);
+        if (data.success) {
+            alert('Đã xóa thành công!');
+            location.reload();
+        } else {
+            alert('Lỗi: ' + (data.message || data.detail || 'Không xóa được'));
+        }
+    } catch (e) {
+        console.error('[DELETE]', e);
+        alert('Lỗi mạng: ' + e.message);
+    }
+};
+</script>
+<script>
+(function () {
+    const ICON_UP = '<svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>';
+    const ICON_DOWN = '<svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>';
+    const ICON_BOTH = '<svg class="w-4 h-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12"/></svg>';
+
+    function normTime(t) {
+        if (t == null || t === '') return '';
+        const m = String(t).trim().match(/^(\d{1,2}):(\d{2})/);
+        if (!m) return String(t).trim();
+        return String(parseInt(m[1], 10)).padStart(2, '0') + ':' + m[2];
+    }
+
+    function to24h(h, m, ap) {
+        let H = parseInt(h, 10);
+        if (Number.isNaN(H)) H = 0;
+        const mm = parseInt(m, 10);
+        const M = Number.isNaN(mm) ? '00' : String(mm).padStart(2, '0');
+        if (ap === 'PM' && H !== 12) H += 12;
+        if (ap === 'AM' && H === 12) H = 0;
+        return String(H).padStart(2, '0') + ':' + M;
+    }
+
+    function adminOrdersTable() {
+        let initial = [];
+        try {
+            const el = document.getElementById('orders-boot');
+            if (el && el.value) initial = JSON.parse(el.value);
+        } catch (e) { initial = []; }
+
+        initial.forEach(function (r) { r.bid = r._id || ''; });
+
+        return {
+            allRows: Array.isArray(initial) ? initial : [],
+            displayRows: [],
+            loading: false,
+            errorMsg: '',
+            filterOpen: false,
+            sortKey: null,
+            sortDir: 'desc',
+            fName: '',
+            fDate: '',
+            fCount: '',
+            fLocation: '',
+            fStatus: '',
+            timeH: '9',
+            timeM: '00',
+            timeAP: 'AM',
+            timeFilterEnabled: false,
+            dateFilterEnabled: false,
+            activeFName: '',
+            activeFTime: '',
+            activeFDate: '',
+            activeFCount: '',
+            activeFLocation: '',
+            activeFStatus: '',
+
+            init() {
+                this.rebuild();
+            },
+
+            hours12() {
+                return Array.from({ length: 12 }, (_, i) => String(i + 1));
+            },
+            minutes60() {
+                return Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+            },
+
+            uniqueList(kind) {
+                const s = new Set();
+                for (const r of this.allRows) {
+                    let v = null;
+                    if (kind === 'name') v = r._customer_name;
+                    else if (kind === 'time') v = r.pickup_time;
+                    else if (kind === 'date') v = r.pickup_date;
+                    else if (kind === 'count') v = r.book_count != null ? String(r.book_count) : '';
+                    else if (kind === 'location') v = r.pickup_location_name;
+                    else if (kind === 'status') v = r._admin_status_label;
+                    const t = v == null ? '' : String(v).trim();
+                    if (t) s.add(t);
+                }
+                return [...s].sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+            },
+
+            formatTimeDisplay(t24) {
+                const n = normTime(t24);
+                if (!n || !/^\d{2}:\d{2}$/.test(n)) return t24;
+                const [hs, ms] = n.split(':');
+                let h = parseInt(hs, 10);
+                const ap = h >= 12 ? 'PM' : 'AM';
+                let h12 = h % 12;
+                if (h12 === 0) h12 = 12;
+                return h12 + ':' + ms + ' ' + ap;
+            },
+
+            pickQuickTime(t24) {
+                const n = normTime(t24);
+                if (!n) return;
+                const [hs, ms] = n.split(':');
+                let h = parseInt(hs, 10);
+                const ap = h >= 12 ? 'PM' : 'AM';
+                let h12 = h % 12;
+                if (h12 === 0) h12 = 12;
+                this.timeH = String(h12);
+                this.timeM = ms;
+                this.timeAP = ap;
+                this.timeFilterEnabled = true;
+            },
+
+            clearTimeFilter() {
+                this.timeFilterEnabled = false;
+                this.timeH = '9';
+                this.timeM = '00';
+                this.timeAP = 'AM';
+            },
+
+            sortIcon(key) {
+                if (this.sortKey !== key) return ICON_BOTH;
+                return this.sortDir === 'asc' ? ICON_UP : ICON_DOWN;
+            },
+
+            toggleSort(key) {
+                if (this.sortKey !== key) {
+                    this.sortKey = key;
+                    this.sortDir = 'asc';
+                } else if (this.sortDir === 'asc') {
+                    this.sortDir = 'desc';
+                } else {
+                    this.sortKey = null;
+                    this.sortDir = 'desc';
+                }
+                this.rebuild();
+            },
+
+            applyFilters() {
+                this.activeFName = this.fName;
+                this.activeFCount = this.fCount;
+                this.activeFLocation = this.fLocation;
+                this.activeFStatus = this.fStatus;
+                if (this.timeFilterEnabled) {
+                    this.activeFTime = to24h(this.timeH, this.timeM, this.timeAP);
+                } else {
+                    this.activeFTime = '';
+                }
+                if (this.dateFilterEnabled && this.fDate) {
+                    this.activeFDate = this.fDate;
+                } else {
+                    this.activeFDate = '';
+                }
+                this.rebuild();
+            },
+
+            clearFilters() {
+                this.fName = this.fDate = this.fCount = this.fLocation = this.fStatus = '';
+                this.activeFName = this.activeFTime = this.activeFDate = this.activeFCount = this.activeFLocation = this.activeFStatus = '';
+                this.clearTimeFilter();
+                this.dateFilterEnabled = false;
+                this.rebuild();
+            },
+
+            subMatch(hay, needle) {
+                if (!needle || !String(needle).trim()) return true;
+                const h = hay == null ? '' : String(hay).toLowerCase();
+                return h.includes(String(needle).trim().toLowerCase());
+            },
+
+            rebuild() {
+                let list = [...this.allRows];
+                if (this.activeFName) list = list.filter((r) => this.subMatch(r._customer_name, this.activeFName));
+                if (this.activeFTime) {
+                    const want = normTime(this.activeFTime);
+                    list = list.filter((r) => normTime(r.pickup_time) === want);
+                }
+                if (this.activeFDate) {
+                    const d = String(this.activeFDate).trim();
+                    list = list.filter((r) => String(r.pickup_date || '').trim() === d);
+                }
+                if (this.activeFCount) list = list.filter((r) => this.subMatch(String(r.book_count), this.activeFCount));
+                if (this.activeFLocation) list = list.filter((r) => this.subMatch(r.pickup_location_name, this.activeFLocation));
+                if (this.activeFStatus) list = list.filter((r) => this.subMatch(r._admin_status_label, this.activeFStatus));
+
+                const dir = this.sortDir === 'asc' ? 1 : -1;
+                if (this.sortKey) {
+                    list.sort((a, b) => {
+                        let cmp = 0;
+                        switch (this.sortKey) {
+                            case 'customer':
+                                cmp = String(a._customer_name || '').localeCompare(String(b._customer_name || ''), 'vi');
+                                break;
+                            case 'time':
+                                cmp = normTime(a.pickup_time).localeCompare(normTime(b.pickup_time), 'vi', { numeric: true });
+                                break;
+                            case 'date':
+                                cmp = String(a.pickup_date || '').localeCompare(String(b.pickup_date || ''), 'vi', { numeric: true });
+                                break;
+                            case 'count': {
+                                const va = Number(a.book_count) || 0;
+                                const vb = Number(b.book_count) || 0;
+                                return (va - vb) * dir;
+                            }
+                            case 'location':
+                                cmp = String(a.pickup_location_name || '').localeCompare(String(b.pickup_location_name || ''), 'vi');
+                                break;
+                            case 'status':
+                                cmp = String(a._admin_status_label || '').localeCompare(String(b._admin_status_label || ''), 'vi');
+                                break;
+                            default:
+                                return 0;
+                        }
+                        return cmp * dir;
+                    });
+                } else {
+                    list.sort((a, b) => String(b._created_at || '').localeCompare(String(a._created_at || '')));
+                }
+                this.displayRows = list;
+            },
+
+            async refresh() {
+                this.loading = true;
+                this.errorMsg = '';
+                try {
+                    const res = await fetch('/api/admin/bookings/active', { credentials: 'same-origin' });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        this.errorMsg = data.detail || data.message || 'Không tải được dữ liệu';
+                        return;
+                    }
+                    const rows = data.bookings || [];
+                    rows.forEach(function (r) { r.bid = r._id || ''; });
+                    this.allRows = rows;
+                    this.rebuild();
+                } catch (e) {
+                    this.errorMsg = 'Lỗi mạng hoặc server';
+                } finally {
+                    this.loading = false;
+                }
+            },
+        };
+    }
+    window.adminOrdersTable = adminOrdersTable;
+})();
+</script>
+<script>
+(function () {
+    function testScenarios() {
+        return {
+            running: null,
+            lastScenario: null,
+            lastResult: null,
+
+            async dispatch(scenarioId) {
+                this.running = scenarioId;
+                this.lastScenario = scenarioId;
+                this.lastResult = null;
+                try {
+                    var res = await fetch('/api/admin/test-scenario/dispatch', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ scenario_id: scenarioId }),
+                    });
+                    var data = await res.json();
+                    this.lastResult = data;
+                } catch (e) {
+                    this.lastResult = { success: false, message: 'Lỗi mạng: ' + e.message };
+                } finally {
+                    this.running = null;
+                }
+            },
+        };
+    }
+    window.testScenarios = testScenarios;
+})();
+</script>
+{% endblock %}

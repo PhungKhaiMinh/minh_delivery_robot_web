@@ -1,0 +1,272 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Plotting — Admin{% endblock %}
+
+{% block admin_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block admin_content %}
+{% set plot_cfg = {
+    "topicsMap": robot_status_ugv_topics,
+} %}
+<div class="max-w-7xl mx-auto space-y-6" x-data='adminPlotting({{ plot_cfg|tojson }})'>
+    <div>
+        <h1 class="text-2xl font-bold text-slate-900">Plotting</h1>
+        <p class="text-sm text-slate-500 mt-1">
+            Biểu đồ thời gian thực — cập nhật 10 Hz qua bridge MQTT.
+        </p>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-3">
+        <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold"
+            :class="{
+                'bg-emerald-100 text-emerald-800': conn === 'connected',
+                'bg-amber-100 text-amber-800': conn === 'reconnecting',
+                'bg-slate-200 text-slate-700': conn === 'disconnected',
+                'bg-red-100 text-red-800': conn === 'error',
+            }">
+            <span class="w-2 h-2 rounded-full" :class="conn === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'"></span>
+            <span x-text="connLabel"></span>
+        </span>
+        <span class="text-xs text-slate-500" x-text="'Nhận: ' + msgCount + ' msg | Vẽ: ' + drawCount + ' điểm'"></span>
+        <span class="text-xs text-red-600" x-show="errDetail" x-text="errDetail"></span>
+    </div>
+
+    <div class="grid grid-cols-1 gap-6">
+        <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
+            <h2 class="text-sm font-semibold text-slate-800 mb-1">Tốc độ thực tế (bánh trái / phải) / Time (s)</h2>
+            <p class="text-[11px] text-slate-400 mb-2">UGV/control/curr_vel</p>
+            <canvas id="plot-curr-vel" height="100"></canvas>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-800 mb-1">Cross track / Time (s)</h2>
+                <p class="text-[11px] text-slate-400 mb-2">UGV/control/para</p>
+                <canvas id="plot-cross" height="100"></canvas>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-800 mb-1">Along track / Time (s)</h2>
+                <p class="text-[11px] text-slate-400 mb-2">UGV/control/para</p>
+                <canvas id="plot-along" height="100"></canvas>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-800 mb-1">Byte/s (2 STM) / Time (s)</h2>
+                <p class="text-[11px] text-slate-400 mb-2">UGV/bytePerSecond</p>
+                <canvas id="plot-bytes" height="100"></canvas>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-800 mb-1">Góc Yaw IMU (rad) / Time (s)</h2>
+                <p class="text-[11px] text-slate-400 mb-2">UGV/position/heading</p>
+                <canvas id="plot-yaw" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <details class="text-xs text-slate-500 bg-slate-50 rounded-xl p-4 border border-slate-200">
+        <summary class="cursor-pointer font-medium text-slate-700">Topic đang subscribe</summary>
+        <ul class="mt-3 space-y-1 font-mono text-[11px] list-none pl-0">
+            {% for key, path in robot_status_ugv_topics.items() %}
+            <li><span class="text-slate-400">{{ key }}:</span> {{ path }}</li>
+            {% endfor %}
+        </ul>
+    </details>
+</div>
+
+<script>
+(function () {
+    var MAX_POINTS = 300;
+    var RENDER_MS = 100;
+
+    function pickNum() {
+        for (var i = 0; i < arguments.length; i++) {
+            var v = arguments[i];
+            if (v != null && v !== '' && !Number.isNaN(Number(v))) return Number(v);
+        }
+        return null;
+    }
+
+    function invertMap(m) {
+        var inv = {};
+        if (!m) return inv;
+        Object.keys(m).forEach(function (k) { inv[m[k]] = k; });
+        return inv;
+    }
+
+    function mkChart(id, labels, colors, yTitle) {
+        var el = document.getElementById(id);
+        if (!el) return null;
+        var datasets = [];
+        for (var i = 0; i < labels.length; i++) {
+            datasets.push({
+                label: labels[i],
+                data: [],
+                borderColor: colors[i],
+                tension: 0.2,
+                pointRadius: 0,
+                borderWidth: 2,
+                fill: false,
+            });
+        }
+        return new Chart(el.getContext('2d'), {
+            type: 'line',
+            data: { labels: [], datasets: datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                animation: false,
+                scales: {
+                    x: { title: { display: true, text: 'Time (s)' } },
+                    y: { title: { display: true, text: yTitle }, beginAtZero: false },
+                },
+            },
+        });
+    }
+
+    function flushSingle(chart, buf) {
+        if (!chart || buf.length === 0) return 0;
+        var lab = chart.data.labels;
+        var d0 = chart.data.datasets[0].data;
+        var n = buf.length;
+        for (var i = 0; i < n; i++) {
+            lab.push(buf[i].ts);
+            d0.push(buf[i].v);
+        }
+        while (lab.length > MAX_POINTS) { lab.shift(); d0.shift(); }
+        buf.length = 0;
+        chart.update('none');
+        return n;
+    }
+
+    function flushDual(chart, buf) {
+        if (!chart || buf.length === 0) return 0;
+        var lab = chart.data.labels;
+        var d0 = chart.data.datasets[0].data;
+        var d1 = chart.data.datasets[1].data;
+        var n = buf.length;
+        for (var i = 0; i < n; i++) {
+            lab.push(buf[i].ts);
+            d0.push(buf[i].v1 != null ? buf[i].v1 : null);
+            d1.push(buf[i].v2 != null ? buf[i].v2 : null);
+        }
+        while (lab.length > MAX_POINTS) { lab.shift(); d0.shift(); d1.shift(); }
+        buf.length = 0;
+        chart.update('none');
+        return n;
+    }
+
+    function adminPlotting(cfg) {
+        cfg = cfg || {};
+        var topicsMap = cfg.topicsMap || {};
+        var topicToKey = invertMap(topicsMap);
+        var t0 = performance.now();
+
+        var chartCurrVel = null;
+        var chartCross = null;
+        var chartAlong = null;
+        var chartBytes = null;
+        var chartYaw = null;
+
+        var bufCurrVel = [];
+        var bufCross = [];
+        var bufAlong = [];
+        var bufBytes = [];
+        var bufYaw = [];
+
+        return {
+            conn: 'disconnected',
+            connLabel: 'Chưa kết nối',
+            errDetail: '',
+            msgCount: 0,
+            drawCount: 0,
+
+            init: function () {
+                var self = this;
+
+                chartCurrVel = mkChart('plot-curr-vel', ['Trái', 'Phải'], ['rgb(14,165,233)', 'rgb(217,70,239)'], 'Tốc độ');
+                chartCross = mkChart('plot-cross', ['Cross track'], ['rgb(234,88,12)'], 'Cross track (m)');
+                chartAlong = mkChart('plot-along', ['Along track'], ['rgb(22,163,74)'], 'Along track (m)');
+                chartBytes = mkChart('plot-bytes', ['byte_sensor', 'byte_vel'], ['rgb(234,179,8)', 'rgb(20,184,166)'], 'byte/s');
+                chartYaw = mkChart('plot-yaw', ['Yaw'], ['rgb(124,58,237)'], 'Yaw (rad)');
+
+                setInterval(function () {
+                    var drawn = 0;
+                    drawn += flushSingle(chartYaw, bufYaw);
+                    drawn += flushSingle(chartCross, bufCross);
+                    drawn += flushSingle(chartAlong, bufAlong);
+                    drawn += flushDual(chartCurrVel, bufCurrVel);
+                    drawn += flushDual(chartBytes, bufBytes);
+                    if (drawn > 0) self.drawCount += drawn;
+                }, RENDER_MS);
+
+                var client = window.AdminMqtt.connect('', '', function (state, detail) {
+                    self.conn = state;
+                    self.errDetail = detail || '';
+                    var labels = { connected: 'MQTT OK', disconnected: 'Mất kết nối', reconnecting: 'Đang nối lại…', error: 'Lỗi' };
+                    self.connLabel = labels[state] || state;
+                    if (state === 'connected' && client) {
+                        ['heading', 'curr_vel', 'para', 'byte_per_sec'].forEach(function (k) {
+                            var t = topicsMap[k];
+                            if (t) client.subscribe(t, { qos: 0 });
+                        });
+                    }
+                });
+
+                if (client) {
+                    client.on('message', function (topic, msg) {
+                        self.msgCount++;
+                        var key = topicToKey[topic];
+                        if (!key) return;
+                        var raw = msg.toString();
+                        var o = window.AdminMqtt.safeParseJson(raw);
+                        var ts = ((performance.now() - t0) / 1000).toFixed(1);
+
+                        switch (key) {
+                            case 'heading':
+                                var yaw = null;
+                                if (o && typeof o === 'object') {
+                                    yaw = pickNum(o.heading, o.yaw);
+                                } else {
+                                    yaw = pickNum(Number(String(raw).trim()));
+                                }
+                                if (yaw != null) bufYaw.push({ ts: ts, v: yaw });
+                                break;
+
+                            case 'curr_vel':
+                                if (!o) break;
+                                bufCurrVel.push({
+                                    ts: ts,
+                                    v1: pickNum(o.left, o.left_vel),
+                                    v2: pickNum(o.right, o.right_vel)
+                                });
+                                break;
+
+                            case 'para':
+                                if (!o) break;
+                                var cross = pickNum(o.cross_track, o.crossTrack, o.cross_track_m, o.cross_track_error);
+                                var along = pickNum(o.along_track, o.alongTrack, o.along_track_m);
+                                if (cross != null) bufCross.push({ ts: ts, v: cross });
+                                if (along != null) bufAlong.push({ ts: ts, v: along });
+                                break;
+
+                            case 'byte_per_sec':
+                                if (!o) break;
+                                bufBytes.push({
+                                    ts: ts,
+                                    v1: pickNum(o.byte_sensor, o.byte_yaw),
+                                    v2: pickNum(o.byte_vel)
+                                });
+                                break;
+                        }
+                    });
+                }
+            },
+        };
+    }
+    window.adminPlotting = adminPlotting;
+})();
+</script>
+{% endblock %}

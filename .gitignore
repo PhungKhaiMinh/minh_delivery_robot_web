@@ -28,10 +28,16 @@ ros2_ws/log/
 .DS_Store
 Thumbs.db
 
+# Firebase Admin (không commit)
+*firebase-adminsdk*.json
+serviceAccount*.json
+firebase-service-account.json
+
 # Env
 .env
 venv/
 env/
+.conda/
 
 # Data files (generated at runtime)
 data/collections/

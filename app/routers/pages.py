@@ -18,6 +18,13 @@ templates = Jinja2Templates(directory="app/templates")
 router = APIRouter(tags=["Pages"])
 
 
+def _redirect_if_admin(user):
+    """Giao diện client chỉ dành cho role client."""
+    if user and getattr(user, "role", "client") == "admin":
+        return RedirectResponse(url="/admin", status_code=302)
+    return None
+
+
 def _get_robot_info() -> dict:
     """Lấy thông tin robot mặc định."""
     robot = db.collection("robots").document("robot_01").get()
@@ -33,9 +40,11 @@ def _get_robot_info() -> dict:
 
 @router.get("/", response_class=HTMLResponse)
 async def page_home(request: Request):
-    """Trang chủ — redirect đến dashboard nếu đã đăng nhập."""
+    """Trang chủ — redirect đến dashboard hoặc admin nếu đã đăng nhập."""
     user = get_current_user(request)
     if user:
+        if user.role == "admin":
+            return RedirectResponse(url="/admin", status_code=302)
         return RedirectResponse(url="/dashboard", status_code=302)
     return RedirectResponse(url="/login", status_code=302)
 
@@ -44,16 +53,20 @@ async def page_home(request: Request):
 async def page_login(request: Request):
     user = get_current_user(request)
     if user:
+        if user.role == "admin":
+            return RedirectResponse(url="/admin", status_code=302)
         return RedirectResponse(url="/dashboard", status_code=302)
-    return templates.TemplateResponse("auth/login.html", {"request": request})
+    return templates.TemplateResponse(request, "auth/login.html")
 
 
 @router.get("/register", response_class=HTMLResponse)
 async def page_register(request: Request):
     user = get_current_user(request)
     if user:
+        if user.role == "admin":
+            return RedirectResponse(url="/admin", status_code=302)
         return RedirectResponse(url="/dashboard", status_code=302)
-    return templates.TemplateResponse("auth/register.html", {"request": request})
+    return templates.TemplateResponse(request, "auth/register.html")
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -61,6 +74,9 @@ async def page_dashboard(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    redir = _redirect_if_admin(user)
+    if redir:
+        return redir
 
     bookings = get_user_bookings(user.id)
 
@@ -77,14 +93,17 @@ async def page_dashboard(request: Request):
 
     current_date = datetime.now().strftime("%A, %d/%m/%Y")
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "user": user,
-        "active_page": "dashboard",
-        "stats": stats,
-        "recent_bookings": bookings[:5],
-        "current_date": current_date,
-    })
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        {
+            "user": user,
+            "active_page": "dashboard",
+            "stats": stats,
+            "recent_bookings": bookings[:5],
+            "current_date": current_date,
+        },
+    )
 
 
 @router.get("/booking", response_class=HTMLResponse)
@@ -92,17 +111,23 @@ async def page_booking(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    redir = _redirect_if_admin(user)
+    if redir:
+        return redir
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    return templates.TemplateResponse("booking.html", {
-        "request": request,
-        "user": user,
-        "active_page": "booking",
-        "locations": CAMPUS_LOCATIONS,
-        "today": today,
-        "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
-    })
+    return templates.TemplateResponse(
+        request,
+        "booking.html",
+        {
+            "user": user,
+            "active_page": "booking",
+            "locations": CAMPUS_LOCATIONS,
+            "today": today,
+            "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
+        },
+    )
 
 
 @router.get("/order/{booking_id}", response_class=HTMLResponse)
@@ -111,6 +136,9 @@ async def page_order_detail(booking_id: str, request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    redir = _redirect_if_admin(user)
+    if redir:
+        return redir
 
     booking = get_booking_by_id(booking_id)
     if not booking or booking.get("user_id") != user.id:
@@ -120,17 +148,20 @@ async def page_order_detail(booking_id: str, request: Request):
     is_active = booking.get("status") in active_statuses
     robot = _get_robot_info()
 
-    return templates.TemplateResponse("order_detail.html", {
-        "request": request,
-        "user": user,
-        "active_page": "history",
-        "booking": booking,
-        "is_active": is_active,
-        "robot_status": robot["status"],
-        "robot_battery": robot["battery"],
-        "locations": CAMPUS_LOCATIONS,
-        "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
-    })
+    return templates.TemplateResponse(
+        request,
+        "order_detail.html",
+        {
+            "user": user,
+            "active_page": "history",
+            "booking": booking,
+            "is_active": is_active,
+            "robot_status": robot["status"],
+            "robot_battery": robot["battery"],
+            "locations": CAMPUS_LOCATIONS,
+            "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
+        },
+    )
 
 
 @router.get("/history", response_class=HTMLResponse)
@@ -138,16 +169,22 @@ async def page_history(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    redir = _redirect_if_admin(user)
+    if redir:
+        return redir
 
     bookings = get_user_bookings(user.id)
 
-    return templates.TemplateResponse("history.html", {
-        "request": request,
-        "user": user,
-        "active_page": "history",
-        "bookings": bookings,
-        "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
-    })
+    return templates.TemplateResponse(
+        request,
+        "history.html",
+        {
+            "user": user,
+            "active_page": "history",
+            "bookings": bookings,
+            "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
+        },
+    )
 
 
 @router.get("/profile", response_class=HTMLResponse)
@@ -155,10 +192,16 @@ async def page_profile(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
+    redir = _redirect_if_admin(user)
+    if redir:
+        return redir
 
-    return templates.TemplateResponse("profile.html", {
-        "request": request,
-        "user": user,
-        "active_page": "profile",
-        "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
-    })
+    return templates.TemplateResponse(
+        request,
+        "profile.html",
+        {
+            "user": user,
+            "active_page": "profile",
+            "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
+        },
+    )
