@@ -230,12 +230,40 @@
 </div>
 
 <!-- ═══════════════ TEST SCENARIOS ═══════════════ -->
-<div class="max-w-7xl mx-auto mt-10 space-y-4" x-data="testScenarios()">
+{% set orders_test_cfg = {
+    "wsUrl": mqtt_ws_url,
+    "clientPrefix": mqtt_client_prefix,
+    "mqttUser": mqtt_username,
+    "mqttPass": mqtt_password,
+    "topicGps": robot_status_ugv_topics.gps,
+} %}
+<div class="max-w-7xl mx-auto mt-10 space-y-4" x-data='testScenarios({{ orders_test_cfg|tojson }})'>
     <div class="flex items-center gap-3">
         <h2 class="text-xl font-bold text-slate-900">Kịch bản kiểm tra thực địa</h2>
         <span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold uppercase tracking-wide">Test</span>
     </div>
     <p class="text-sm text-slate-500">Gửi danh sách waypoints trực tiếp lên MQTT để kiểm tra xe chạy thực tế.</p>
+
+    <div class="rounded-xl border border-amber-200 bg-amber-50/90 p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+        <div class="text-xs text-amber-950 space-y-1 min-w-0">
+            <p class="font-semibold text-sm text-amber-950">Điểm gốc GPS → tọa độ x,y (server)</p>
+            <p class="text-amber-900/90">Nút bên phải lấy <strong>Lat/Lon mới nhất</strong> từ <span class="font-mono">UGV/position/gps</span> (cùng luồng với phần tùy chỉnh bên dưới), cập nhật thuật toán chuyển đổi trên server, rồi gửi gốc mới lên <span class="font-mono">UGV/position/gps/base</span>.</p>
+            <p class="text-emerald-800 font-medium" x-show="baseUpdateMessage" x-text="baseUpdateMessage"></p>
+        </div>
+        <button type="button"
+            @click="updateCampusBaseFromGps()"
+            :disabled="gpsLiveLat == null || gpsLiveLon == null || updatingBase"
+            class="shrink-0 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap"
+            :class="(gpsLiveLat == null || gpsLiveLon == null || updatingBase)
+                ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                : 'bg-amber-600 text-white hover:bg-amber-700 active:bg-amber-800'">
+            <span x-show="!updatingBase">Cập nhật tọa độ base mới</span>
+            <span x-show="updatingBase" class="flex items-center gap-2">
+                <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                Đang cập nhật…
+            </span>
+        </button>
+    </div>
 
     <!-- Scenario: Football field -->
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -292,8 +320,116 @@
                     <p class="font-semibold" x-text="lastResult.message"></p>
                     <template x-if="lastResult.payload">
                         <div class="mt-2 text-xs font-mono bg-white/60 rounded-lg p-3 overflow-x-auto">
-                            <p><span class="text-slate-500">stage_x:</span> [<span x-text="lastResult.payload.stage_x.join(', ')"></span>]</p>
-                            <p><span class="text-slate-500">stage_y:</span> [<span x-text="lastResult.payload.stage_y.join(', ')"></span>]</p>
+                            <p class="break-all"><span class="text-slate-500">stage_x:</span> [<span x-text="stageJoin(lastResult.payload.stage_x)"></span>]</p>
+                            <p class="break-all"><span class="text-slate-500">stage_y:</span> [<span x-text="stageJoin(lastResult.payload.stage_y)"></span>]</p>
+                        </div>
+                    </template>
+                </div>
+            </template>
+        </div>
+    </div>
+    <!-- Scenario: Custom waypoints (2+ points, draft persisted) -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                    <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                        <span class="w-3 h-3 rounded-full bg-violet-500"></span>
+                        Kịch bản tùy chỉnh
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-1">Nhập từ 2 điểm trở lên (có thể thêm/bớt dòng). Tọa độ được lưu trên trình duyệt; chỉ các dòng có đủ Lat và Lon mới được gửi, theo thứ tự từ trên xuống.</p>
+                </div>
+                <button type="button"
+                    @click="dispatchCustom()"
+                    :disabled="running === 'custom'"
+                    class="shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                    :class="running === 'custom'
+                        ? 'bg-slate-200 text-slate-500 cursor-wait'
+                        : 'bg-violet-600 text-white hover:bg-violet-700 active:bg-violet-800'">
+                    <span x-show="running !== 'custom'">Bắt đầu</span>
+                    <span x-show="running === 'custom'" class="flex items-center gap-2">
+                        <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                        Đang gửi…
+                    </span>
+                </button>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <button type="button" @click="addWaypointRow()"
+                    class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-100 text-violet-800 hover:bg-violet-200">
+                    + Thêm điểm
+                </button>
+                <span class="text-xs text-slate-400">Tối đa 20 điểm</span>
+            </div>
+
+            <div class="rounded-xl border border-violet-200 bg-violet-50/60 p-3 space-y-2">
+                <p class="text-xs font-semibold text-violet-900">Gán tọa độ từ robot — <span class="font-normal text-violet-700">UGV/position/gps</span></p>
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium"
+                        :class="{
+                            'bg-emerald-100 text-emerald-800': gpsConn === 'connected',
+                            'bg-amber-100 text-amber-800': gpsConn === 'reconnecting',
+                            'bg-slate-200 text-slate-600': gpsConn === 'disconnected',
+                            'bg-red-100 text-red-800': gpsConn === 'error',
+                        }">
+                        <span class="w-1.5 h-1.5 rounded-full" :class="gpsConn === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+                        <span x-text="gpsConnLabel"></span>
+                    </span>
+                    <span class="text-slate-600">Lat/Lon mới nhất:</span>
+                    <span class="font-mono text-slate-800 break-all" x-text="gpsLiveSummary"></span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <label class="text-xs text-slate-600 shrink-0">Gán vào</label>
+                    <select x-model.number="gpsTargetIndex"
+                        class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white min-w-[7rem]">
+                        <template x-for="(pt, idx) in customPoints" :key="pt._k">
+                            <option :value="idx" x-text="'Điểm ' + (idx + 1)"></option>
+                        </template>
+                    </select>
+                    <button type="button" @click="applyGpsToTarget()"
+                        class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-600 text-white hover:bg-violet-700">
+                        Gán GPS vào điểm đã chọn
+                    </button>
+                </div>
+                <p class="text-[11px] text-slate-500">Hoặc dùng nút <strong class="text-violet-700">GPS</strong> cạnh mỗi dòng bên dưới.</p>
+                <p class="text-[11px] text-red-600" x-show="gpsErr" x-text="gpsErr"></p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <template x-for="(pt, idx) in customPoints" :key="pt._k">
+                    <div class="flex items-center gap-2 bg-slate-50 rounded-xl p-3">
+                        <span class="text-xs font-bold text-slate-500 w-5 shrink-0" x-text="idx + 1"></span>
+                        <div class="flex-1 grid grid-cols-2 gap-2">
+                            <input type="text" inputmode="decimal" x-model="pt.lat" @input="saveDraft()"
+                                class="w-full min-w-[10rem] max-w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                                placeholder="Lat" autocomplete="off" spellcheck="false" />
+                            <input type="text" inputmode="decimal" x-model="pt.lon" @input="saveDraft()"
+                                class="w-full min-w-[10rem] max-w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
+                                placeholder="Lon" autocomplete="off" spellcheck="false" />
+                        </div>
+                        <button type="button" @click="applyGpsToRow(idx)"
+                            class="shrink-0 p-1.5 rounded-lg text-violet-600 hover:bg-violet-100 border border-transparent hover:border-violet-200"
+                            title="Gán Lat/Lon GPS hiện tại vào dòng này">
+                            <span class="text-[10px] font-bold leading-none">GPS</span>
+                        </button>
+                        <button type="button" x-show="customPoints.length > 2" @click="removeWaypointRow(idx)"
+                            class="shrink-0 p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            title="Xóa điểm này">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Result -->
+            <template x-if="lastResult && lastScenario === 'custom'">
+                <div class="rounded-xl p-4 text-sm"
+                    :class="lastResult.success ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-red-50 border border-red-200 text-red-800'">
+                    <p class="font-semibold" x-text="lastResult.message"></p>
+                    <template x-if="lastResult.payload">
+                        <div class="mt-2 text-xs font-mono bg-white/60 rounded-lg p-3 overflow-x-auto">
+                            <p class="break-all"><span class="text-slate-500">stage_x:</span> [<span x-text="stageJoin(lastResult.payload.stage_x)"></span>]</p>
+                            <p class="break-all"><span class="text-slate-500">stage_y:</span> [<span x-text="stageJoin(lastResult.payload.stage_y)"></span>]</p>
                         </div>
                     </template>
                 </div>
@@ -570,11 +706,217 @@ window._doDeleteOrder = async function (id) {
 </script>
 <script>
 (function () {
-    function testScenarios() {
+    var CUSTOM_DRAFT_LS = 'admin_orders_custom_waypoints_draft';
+    var _wpId = 0;
+
+    function newWaypointRow(lat, lon) {
+        _wpId += 1;
+        var sLat = lat != null && String(lat).trim() !== '' ? String(lat).trim() : '';
+        var sLon = lon != null && String(lon).trim() !== '' ? String(lon).trim() : '';
+        return { lat: sLat, lon: sLon, _k: 'wp' + _wpId };
+    }
+
+    function pickNumGps() {
+        for (var i = 0; i < arguments.length; i++) {
+            var v = arguments[i];
+            if (v != null && v !== '' && !Number.isNaN(Number(v))) return Number(v);
+        }
+        return null;
+    }
+
+    function testScenarios(cfg) {
+        cfg = cfg || {};
+        var topicGps = cfg.topicGps || 'UGV/position/gps';
+        var wsUrl = cfg.wsUrl || '';
+        var clientPrefix = cfg.clientPrefix || '';
+
         return {
             running: null,
             lastScenario: null,
             lastResult: null,
+            customPoints: [],
+            gpsConn: 'disconnected',
+            gpsConnLabel: 'Chưa kết nối',
+            gpsErr: '',
+            gpsLiveLat: null,
+            gpsLiveLon: null,
+            gpsLiveAlt: null,
+            updatingBase: false,
+            baseUpdateMessage: '',
+            gpsTargetIndex: 0,
+            _gpsClient: null,
+
+            get gpsLiveSummary() {
+                if (this.gpsLiveLat == null || this.gpsLiveLon == null) return '—';
+                var f = window.formatCoordDisplay;
+                if (typeof f === 'function') {
+                    return f(this.gpsLiveLat) + ', ' + f(this.gpsLiveLon);
+                }
+                return String(this.gpsLiveLat) + ', ' + String(this.gpsLiveLon);
+            },
+
+            stageJoin(arr) {
+                if (!arr || !arr.length) return '';
+                var fn = window.formatCoordDisplay;
+                return arr.map(function (n) {
+                    return typeof fn === 'function' ? fn(n) : String(n);
+                }).join(', ');
+            },
+
+            _gpsStrings() {
+                if (this.gpsLiveLat == null || this.gpsLiveLon == null) return null;
+                var f = window.formatCoordDisplay;
+                var latStr = typeof f === 'function' ? f(this.gpsLiveLat) : String(this.gpsLiveLat);
+                var lonStr = typeof f === 'function' ? f(this.gpsLiveLon) : String(this.gpsLiveLon);
+                return { latStr: latStr, lonStr: lonStr };
+            },
+
+            applyGpsToRow(idx) {
+                var s = this._gpsStrings();
+                if (!s) {
+                    alert('Chưa có dữ liệu GPS từ UGV/position/gps (chờ robot hoặc kiểm tra MQTT).');
+                    return;
+                }
+                if (idx < 0 || idx >= this.customPoints.length) return;
+                this.customPoints[idx].lat = s.latStr;
+                this.customPoints[idx].lon = s.lonStr;
+                this.saveDraft();
+            },
+
+            applyGpsToTarget() {
+                var i = Number(this.gpsTargetIndex);
+                if (Number.isNaN(i)) i = 0;
+                this.applyGpsToRow(i);
+            },
+
+            async updateCampusBaseFromGps() {
+                if (this.gpsLiveLat == null || this.gpsLiveLon == null) {
+                    window.alert('Chưa có Lat/Lon từ UGV/position/gps — chờ robot hoặc kiểm tra MQTT.');
+                    return;
+                }
+                this.updatingBase = true;
+                this.baseUpdateMessage = '';
+                try {
+                    var alt = this.gpsLiveAlt != null && !Number.isNaN(Number(this.gpsLiveAlt))
+                        ? Number(this.gpsLiveAlt) : 0;
+                    var res = await fetch('/api/admin/campus-gps-origin', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            lat: this.gpsLiveLat,
+                            lon: this.gpsLiveLon,
+                            alt: alt,
+                        }),
+                    });
+                    var data = await res.json().catch(function () { return {}; });
+                    if (data.success) {
+                        this.baseUpdateMessage = data.message || 'Đã cập nhật.';
+                    } else {
+                        this.baseUpdateMessage = '';
+                        window.alert(data.message || ('Lỗi ' + res.status));
+                    }
+                } catch (e) {
+                    window.alert('Lỗi mạng: ' + (e && e.message ? e.message : String(e)));
+                } finally {
+                    this.updatingBase = false;
+                }
+            },
+
+            init() {
+                var self = this;
+                var loaded = false;
+                try {
+                    var raw = localStorage.getItem(CUSTOM_DRAFT_LS);
+                    if (raw) {
+                        var o = JSON.parse(raw);
+                        if (o && Array.isArray(o.points) && o.points.length >= 2) {
+                            this.customPoints = o.points.map(function (p) {
+                                return newWaypointRow(p.lat, p.lon);
+                            });
+                            loaded = true;
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+                if (!loaded) {
+                    this.customPoints = [
+                        newWaypointRow(), newWaypointRow(), newWaypointRow(), newWaypointRow(),
+                    ];
+                }
+
+                var mqttPass = cfg.mqttPass;
+                this._gpsClient = window.AdminMqtt.connect(wsUrl, clientPrefix, function (state, detail) {
+                    self.gpsConn = state;
+                    self.gpsErr = detail || '';
+                    var labels = {
+                        connected: 'MQTT OK',
+                        disconnected: 'Mất kết nối',
+                        reconnecting: 'Đang nối lại…',
+                        error: 'Lỗi',
+                    };
+                    self.gpsConnLabel = labels[state] || state;
+                    if (state === 'connected' && self._gpsClient && topicGps) {
+                        self._gpsClient.subscribe(topicGps, { qos: 0 });
+                    }
+                }, {
+                    username: cfg.mqttUser || undefined,
+                    password: mqttPass !== undefined && mqttPass !== null && String(mqttPass) !== ''
+                        ? String(mqttPass) : undefined,
+                });
+
+                if (this._gpsClient) {
+                    this._gpsClient.on('message', function (t, msg) {
+                        if (t !== topicGps) return;
+                        var o = window.AdminMqtt.safeParseJson(msg.toString());
+                        if (!o || typeof o !== 'object') return;
+                        var la = pickNumGps(o.lat, o.latitude);
+                        var lo = pickNumGps(o.lon, o.lng, o.longitude);
+                        var al = pickNumGps(o.alt, o.altitude, o.msl);
+                        if (la != null) self.gpsLiveLat = la;
+                        if (lo != null) self.gpsLiveLon = lo;
+                        if (al != null) self.gpsLiveAlt = al;
+                    });
+                }
+            },
+
+            saveDraft() {
+                try {
+                    var pts = this.customPoints.map(function (p) {
+                        return { lat: p.lat, lon: p.lon };
+                    });
+                    localStorage.setItem(CUSTOM_DRAFT_LS, JSON.stringify({ points: pts }));
+                } catch (e) { /* ignore */ }
+            },
+
+            addWaypointRow() {
+                if (this.customPoints.length >= 20) return;
+                this.customPoints.push(newWaypointRow());
+                this.saveDraft();
+            },
+
+            removeWaypointRow(idx) {
+                if (this.customPoints.length <= 2) return;
+                this.customPoints.splice(idx, 1);
+                if (this.gpsTargetIndex >= this.customPoints.length) {
+                    this.gpsTargetIndex = Math.max(0, this.customPoints.length - 1);
+                }
+                this.saveDraft();
+            },
+
+            orderedValidWaypoints() {
+                var out = [];
+                for (var i = 0; i < this.customPoints.length; i++) {
+                    var p = this.customPoints[i];
+                    var latStr = String(p.lat != null ? p.lat : '').trim();
+                    var lonStr = String(p.lon != null ? p.lon : '').trim();
+                    if (!latStr || !lonStr) continue;
+                    var lat = parseFloat(latStr.replace(',', '.'));
+                    var lon = parseFloat(lonStr.replace(',', '.'));
+                    if (isNaN(lat) || isNaN(lon)) continue;
+                    out.push({ lat: lat, lon: lon });
+                }
+                return out;
+            },
 
             async dispatch(scenarioId) {
                 this.running = scenarioId;
@@ -589,6 +931,36 @@ window._doDeleteOrder = async function (id) {
                     });
                     var data = await res.json();
                     this.lastResult = data;
+                } catch (e) {
+                    this.lastResult = { success: false, message: 'Lỗi mạng: ' + e.message };
+                } finally {
+                    this.running = null;
+                }
+            },
+
+            async dispatchCustom() {
+                var valid = this.orderedValidWaypoints();
+                if (valid.length < 2) {
+                    this.lastScenario = 'custom';
+                    this.lastResult = { success: false, message: 'Cần ít nhất 2 điểm có Lat và Lon hợp lệ (theo thứ tự từ trên xuống).' };
+                    return;
+                }
+                this.running = 'custom';
+                this.lastScenario = 'custom';
+                this.lastResult = null;
+                try {
+                    var res = await fetch('/api/admin/test-scenario/dispatch-custom', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ waypoints: valid }),
+                    });
+                    var data = await res.json();
+                    this.lastResult = data;
+                    if (data.success) {
+                        localStorage.setItem('custom_scenario_points', JSON.stringify(valid));
+                        this.saveDraft();
+                    }
                 } catch (e) {
                     this.lastResult = { success: false, message: 'Lỗi mạng: ' + e.message };
                 } finally {

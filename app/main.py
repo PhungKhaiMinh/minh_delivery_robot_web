@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.config import APP_NAME, APP_DESCRIPTION, APP_VERSION
+from app.config import APP_NAME, APP_DESCRIPTION, APP_VERSION, IS_VERCEL
 from app.routers import auth, booking, tracking, profile, pages, admin_api, admin_pages, admin_mqtt_bridge
 from app.services.robot_service import init_default_robot
 from app.services.seed_users import ensure_demo_users
@@ -27,16 +27,24 @@ async def lifespan(app: FastAPI):
     init_default_robot()
     ensure_demo_users()
 
-    mqtt_service.start()
-    start_scheduler()
+    if IS_VERCEL:
+        print(
+            "[STARTUP] Vercel: bỏ qua MQTT client nền + scheduler "
+            "(serverless không giữ kết nối TCP / vòng lặp nền). "
+            "Dùng Firestore + MQTT qua trình duyệt (mqtt.js) nếu cần.\n"
+        )
+    else:
+        mqtt_service.start()
+        start_scheduler()
 
     print("[STARTUP] Hệ thống sẵn sàng!\n")
 
     yield
 
     print("\n[SHUTDOWN] Đang tắt hệ thống...")
-    stop_scheduler()
-    mqtt_service.stop()
+    if not IS_VERCEL:
+        stop_scheduler()
+        mqtt_service.stop()
 
 
 app = FastAPI(

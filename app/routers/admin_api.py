@@ -20,10 +20,16 @@ from app.config import (
     MQTT_TOPIC_CONTROL,
     MQTT_CLIENT_PREFIX,
     ROBOT_STATUS_UGV_TOPICS,
+    MQTT_TOPIC_GPS_BASE,
 )
 from app.services.auth_service import require_admin
 from app.services.booking_service import get_admin_queue_bookings
-from app.services.pathfinding_service import get_route_coords, convert_gps_list_to_payload
+from app.services.pathfinding_service import (
+    get_route_coords,
+    convert_gps_list_to_payload,
+    set_campus_gps_origin,
+    get_campus_gps_origin,
+)
 from app.services.mqtt_client import mqtt_service
 
 router = APIRouter(prefix="/api/admin", tags=["Admin API"])
@@ -51,6 +57,7 @@ async def admin_mqtt_config(request: Request):
                     "motors": MQTT_TOPIC_MOTORS,
                     "command": MQTT_TOPIC_COMMAND,
                     "control": MQTT_TOPIC_CONTROL,
+                    "gps_base": MQTT_TOPIC_GPS_BASE,
                     "robot_status_ugv": ROBOT_STATUS_UGV_TOPICS,
                 },
             },
@@ -101,6 +108,86 @@ async def admin_booking_routes(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Campus GPS origin (lat/lon → local x,y reference)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/campus-gps-origin")
+async def admin_get_campus_gps_origin(request: Request):
+    """Trả về gốc GPS hiện tại mà server dùng cho chuyển đổi lat/lon → x,y."""
+    require_admin(request)
+    lat, lon, alt = get_campus_gps_origin()
+    return JSONResponse(
+        content={"success": True, "origin": {"lat": lat, "lon": lon, "alt": alt}}
+    )
+
+
+@router.post("/campus-gps-origin")
+async def admin_set_campus_gps_origin(request: Request):
+    """Đặt gốc GPS mới (body hoặc từ bản tin MQTT server đã nhận trên UGV/position/gps), publish UGV/position/gps/base."""
+    require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    lat = body.get("lat")
+    lon = body.get("lon", body.get("lng"))
+    alt = body.get("alt")
+
+    if lat is None or lon is None:
+        if mqtt_service.robot_lat is not None and mqtt_service.robot_lon is not None:
+            lat = mqtt_service.robot_lat
+            lon = mqtt_service.robot_lon
+            if alt is None and mqtt_service.robot_alt is not None:
+                alt = mqtt_service.robot_alt
+
+    if lat is None or lon is None:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "message": (
+                    "Thiếu lat/lon — chờ bản tin trên UGV/position/gps (server) "
+                    "hoặc mở phần kịch bản để nhận GPS, rồi thử lại / gửi lat, lon trong JSON."
+                ),
+            },
+        )
+
+    if alt is None:
+        alt = 0.0
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+        alt_f = float(alt)
+    except (TypeError, ValueError):
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": "lat, lon hoặc alt không hợp lệ"},
+        )
+
+    set_campus_gps_origin(lat_f, lon_f, alt_f)
+    mqtt_ok = mqtt_service.publish_gps_base(lat_f, lon_f, alt_f)
+    if not mqtt_ok:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "success": False,
+                "message": "Đã cập nhật gốc trên server nhưng không publish được MQTT (broker chưa kết nối?).",
+                "origin": {"lat": lat_f, "lon": lon_f, "alt": alt_f},
+            },
+        )
+
+    return JSONResponse(
+        content={
+            "success": True,
+            "message": "Đã đặt điểm gốc GPS→xy và gửi lên topic gps/base.",
+            "origin": {"lat": lat_f, "lon": lon_f, "alt": alt_f},
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # Test scenarios — kịch bản kiểm tra thực địa
 # ---------------------------------------------------------------------------
 
@@ -146,5 +233,44 @@ async def admin_dispatch_test_scenario(request: Request):
     return JSONResponse(content={
         "success": True,
         "message": f"Đã gửi {len(payload['stage_x'])} waypoints cho kịch bản \"{scenario['name']}\"",
+        "payload": payload,
+    })
+
+
+@router.post("/test-scenario/dispatch-custom")
+async def admin_dispatch_custom_scenario(request: Request):
+    """Nhận danh sách tọa độ GPS tùy chỉnh, convert → local XY, publish MQTT."""
+    require_admin(request)
+    body = await request.json()
+    waypoints = body.get("waypoints", [])
+
+    if not waypoints or len(waypoints) < 2:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": "Cần ít nhất 2 waypoints"},
+        )
+
+    points = []
+    for i, wp in enumerate(waypoints):
+        lat = wp.get("lat")
+        lon = wp.get("lon")
+        if lat is None or lon is None:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "message": f"Waypoint {i+1} thiếu lat hoặc lon"},
+            )
+        points.append((float(lat), float(lon)))
+
+    payload = convert_gps_list_to_payload(points)
+    ok = mqtt_service.publish_path(payload)
+    if not ok:
+        return JSONResponse(
+            status_code=502,
+            content={"success": False, "message": "Không gửi được MQTT (broker chưa kết nối?)"},
+        )
+
+    return JSONResponse(content={
+        "success": True,
+        "message": f"Đã gửi {len(payload['stage_x'])} waypoints tùy chỉnh",
         "payload": payload,
     })

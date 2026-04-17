@@ -3,6 +3,7 @@ Cấu hình chung cho toàn bộ hệ thống BKBookBot.
 Quản lý các biến môi trường, đường dẫn, và thiết lập bảo mật.
 """
 
+import json
 import os
 from pathlib import Path
 from typing import Optional
@@ -10,10 +11,37 @@ from typing import Optional
 # === Đường dẫn gốc của dự án ===
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# === Cấu hình lưu trữ dữ liệu ===
-# - Firestore (Firebase): ưu tiên khi có file Service Account (biến môi trường hoặc file mặc định trong project).
-# - JSON local: chỉ dùng khi không có khóa hoặc USE_FIRESTORE=false.
-DATA_DIR = BASE_DIR / "data" / "collections"
+
+def _materialize_firebase_json_from_env() -> None:
+    """Vercel / serverless: đặt JSON service account vào biến FIREBASE_SERVICE_ACCOUNT_JSON hoặc _B64."""
+    raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+    if not raw:
+        b64 = os.getenv("FIREBASE_SERVICE_ACCOUNT_B64", "").strip()
+        if b64:
+            import base64
+
+            try:
+                raw = base64.b64decode(b64).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                return
+    if not raw:
+        return
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError:
+        print("[CONFIG] FIREBASE_SERVICE_ACCOUNT_JSON / _B64 không phải JSON hợp lệ — bỏ qua")
+        return
+    out = Path("/tmp/firebase-service-account.json")
+    try:
+        out.write_text(raw, encoding="utf-8")
+    except OSError as exc:
+        print(f"[CONFIG] Không ghi được service account vào /tmp: {exc}")
+        return
+    os.environ["FIREBASE_CREDENTIALS_PATH"] = str(out)
+    os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", str(out))
+
+
+_materialize_firebase_json_from_env()
 
 
 def _resolve_firebase_credentials_path() -> str:
@@ -49,6 +77,14 @@ elif _use_fs is False:
     USE_FIRESTORE = False
 else:
     USE_FIRESTORE = bool(FIREBASE_CREDENTIALS_PATH)
+
+# Vercel: filesystem deploy thường read-only — dùng /tmp cho DB file nếu không dùng Firestore.
+IS_VERCEL = os.getenv("VERCEL", "").strip() == "1"
+if IS_VERCEL and not USE_FIRESTORE:
+    DATA_DIR = Path("/tmp/bookbot-data/collections")
+else:
+    DATA_DIR = BASE_DIR / "data" / "collections"
+
 USERS_COLLECTION = DATA_DIR / "users"
 BOOKINGS_COLLECTION = DATA_DIR / "bookings"
 ROBOTS_COLLECTION = DATA_DIR / "robots"
@@ -70,6 +106,7 @@ MQTT_WS_URL = os.getenv("MQTT_WS_URL", "").strip() or f"ws://{MQTT_BROKER_HOST}:
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "client")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "viam1234")
 # Trình duyệt → WebSocket tới FastAPI → paho TCP 1883 (user/pass ở trên). Tắt nếu broker có MQTT-over-WS và dùng mqtt.js trực tiếp.
+# Trên Vercel nên đặt MQTT_USE_SERVER_BRIDGE=false (WebSocket serverless thường không dùng được cầu nội bộ).
 _mqtt_bridge_raw = os.getenv("MQTT_USE_SERVER_BRIDGE", "true").strip().lower()
 MQTT_USE_SERVER_BRIDGE = _mqtt_bridge_raw not in ("0", "false", "no", "off")
 MQTT_BRIDGE_WEB_PATH = os.getenv("MQTT_BRIDGE_WEB_PATH", "/api/admin/mqtt-bridge").strip() or "/api/admin/mqtt-bridge"
@@ -135,6 +172,8 @@ CAMPUS_ORIGIN_ALT = float(os.getenv("CAMPUS_ORIGIN_ALT", "0.0"))
 
 # === MQTT topic gửi waypoints cho robot di chuyển ===
 MQTT_TOPIC_PATH = os.getenv("MQTT_TOPIC_PATH", "UGV/path_topic")
+# Gốc GPS (lat/lon/alt) — đồng bộ với firmware / scheduler khi admin đổi điểm base
+MQTT_TOPIC_GPS_BASE = os.getenv("MQTT_UGV_TOPIC_GPS_BASE", "UGV/position/gps/base")
 
 # === Scheduler: kiểm tra đơn hàng mỗi N giây ===
 SCHEDULER_INTERVAL_SEC = int(os.getenv("SCHEDULER_INTERVAL_SEC", "30"))

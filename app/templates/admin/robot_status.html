@@ -61,19 +61,19 @@
             </div>
             <div>
                 <p class="text-xs font-medium text-slate-500">Vĩ độ (lat)</p>
-                <p class="mt-1 font-mono text-lg font-semibold text-slate-900" x-text="lat != null ? lat.toFixed(4) : '—'"></p>
+                <p class="mt-1 font-mono text-lg font-semibold text-slate-900 break-all" x-text="lat != null ? formatCoordDisplay(lat) : '—'"></p>
             </div>
             <div>
                 <p class="text-xs font-medium text-slate-500">Kinh độ (lon)</p>
-                <p class="mt-1 font-mono text-lg font-semibold text-slate-900" x-text="lon != null ? lon.toFixed(4) : '—'"></p>
+                <p class="mt-1 font-mono text-lg font-semibold text-slate-900 break-all" x-text="lon != null ? formatCoordDisplay(lon) : '—'"></p>
             </div>
             <div>
-                <p class="text-xs font-medium text-slate-500">X <span class="text-slate-400">(East, m)</span></p>
-                <p class="mt-1 font-mono text-lg font-semibold text-sky-700" x-text="localX != null ? localX : '—'"></p>
+                <p class="text-xs font-medium text-slate-500">X <span class="text-slate-400">(North, m)</span></p>
+                <p class="mt-1 font-mono text-lg font-semibold text-sky-700 break-all" x-text="localX != null ? formatCoordDisplay(localX) : '—'"></p>
             </div>
             <div>
-                <p class="text-xs font-medium text-slate-500">Y <span class="text-slate-400">(North, m)</span></p>
-                <p class="mt-1 font-mono text-lg font-semibold text-sky-700" x-text="localY != null ? localY : '—'"></p>
+                <p class="text-xs font-medium text-slate-500">Y <span class="text-slate-400">(East, m)</span></p>
+                <p class="mt-1 font-mono text-lg font-semibold text-sky-700 break-all" x-text="localY != null ? formatCoordDisplay(localY) : '—'"></p>
             </div>
         </div>
     </div>
@@ -198,7 +198,7 @@
             var dx = px - refX, dy = py - refY, dz = pz - refZ;
             var east  = -sinLon * dx + cosLon * dy;
             var north = -sinLat * cosLon * dx - sinLat * sinLon * dy + cosLat * dz;
-            return { x: Math.round(east * 1000) / 1000, y: Math.round(north * 1000) / 1000 };
+            return { x: north, y: east };
         };
     }
 
@@ -242,6 +242,12 @@
         );
 
         return {
+            formatCoordDisplay(v) {
+                if (typeof window.formatCoordDisplay === 'function') return window.formatCoordDisplay(v);
+                if (v == null || v === '') return '—';
+                var n = Number(v);
+                return Number.isFinite(n) ? String(n) : '—';
+            },
             conn: 'disconnected',
             connLabel: 'Chưa kết nối',
             errDetail: '',

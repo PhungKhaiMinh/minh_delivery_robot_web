@@ -33,10 +33,17 @@
     </div>
 
     <div class="grid grid-cols-1 gap-6">
-        <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
-            <h2 class="text-sm font-semibold text-slate-800 mb-1">Tốc độ thực tế (bánh trái / phải) / Time (s)</h2>
-            <p class="text-[11px] text-slate-400 mb-2">UGV/control/curr_vel</p>
-            <canvas id="plot-curr-vel" height="100"></canvas>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-800 mb-1">Bánh trái: thực tế vs điều khiển / Time (s)</h2>
+                <p class="text-[11px] text-slate-400 mb-2">UGV/control/curr_vel (trái) + UGV/control/vel (trái)</p>
+                <canvas id="plot-wheel-left" height="100"></canvas>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
+                <h2 class="text-sm font-semibold text-slate-800 mb-1">Bánh phải: thực tế vs điều khiển / Time (s)</h2>
+                <p class="text-[11px] text-slate-400 mb-2">UGV/control/curr_vel (phải) + UGV/control/vel (phải)</p>
+                <canvas id="plot-wheel-right" height="100"></canvas>
+            </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -59,8 +66,8 @@
                 <canvas id="plot-bytes" height="100"></canvas>
             </div>
             <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
-                <h2 class="text-sm font-semibold text-slate-800 mb-1">Góc Yaw IMU (rad) / Time (s)</h2>
-                <p class="text-[11px] text-slate-400 mb-2">UGV/position/heading</p>
+                <h2 class="text-sm font-semibold text-slate-800 mb-1">Góc Yaw IMU &amp; desired_heading / Time (s)</h2>
+                <p class="text-[11px] text-slate-400 mb-2">UGV/position/heading + UGV/control/para (desired_heading)</p>
                 <canvas id="plot-yaw" height="100"></canvas>
             </div>
         </div>
@@ -164,17 +171,30 @@
         var topicToKey = invertMap(topicsMap);
         var t0 = performance.now();
 
-        var chartCurrVel = null;
+        var chartWheelLeft = null;
+        var chartWheelRight = null;
         var chartCross = null;
         var chartAlong = null;
         var chartBytes = null;
         var chartYaw = null;
 
-        var bufCurrVel = [];
+        var bufWheelLeft = [];
+        var bufWheelRight = [];
         var bufCross = [];
         var bufAlong = [];
         var bufBytes = [];
-        var bufYaw = [];
+        var bufYawDual = [];
+        var lastYawPlot = null;
+        var lastDesiredHeadingPlot = null;
+        var lastActLeft = null;
+        var lastActRight = null;
+        var lastCmdLeft = null;
+        var lastCmdRight = null;
+
+        function pushWheelSamples(ts) {
+            bufWheelLeft.push({ ts: ts, v1: lastActLeft, v2: lastCmdLeft });
+            bufWheelRight.push({ ts: ts, v1: lastActRight, v2: lastCmdRight });
+        }
 
         return {
             conn: 'disconnected',
@@ -186,18 +206,20 @@
             init: function () {
                 var self = this;
 
-                chartCurrVel = mkChart('plot-curr-vel', ['Trái', 'Phải'], ['rgb(14,165,233)', 'rgb(217,70,239)'], 'Tốc độ');
+                chartWheelLeft = mkChart('plot-wheel-left', ['Thực tế (curr_vel)', 'Điều khiển (vel)'], ['rgb(14,165,233)', 'rgb(245,158,11)'], 'Tốc độ trái');
+                chartWheelRight = mkChart('plot-wheel-right', ['Thực tế (curr_vel)', 'Điều khiển (vel)'], ['rgb(217,70,239)', 'rgb(244,63,94)'], 'Tốc độ phải');
                 chartCross = mkChart('plot-cross', ['Cross track'], ['rgb(234,88,12)'], 'Cross track (m)');
                 chartAlong = mkChart('plot-along', ['Along track'], ['rgb(22,163,74)'], 'Along track (m)');
                 chartBytes = mkChart('plot-bytes', ['byte_sensor', 'byte_vel'], ['rgb(234,179,8)', 'rgb(20,184,166)'], 'byte/s');
-                chartYaw = mkChart('plot-yaw', ['Yaw'], ['rgb(124,58,237)'], 'Yaw (rad)');
+                chartYaw = mkChart('plot-yaw', ['Yaw IMU', 'desired_heading'], ['rgb(124,58,237)', 'rgb(245,158,11)'], 'Góc (rad)');
 
                 setInterval(function () {
                     var drawn = 0;
-                    drawn += flushSingle(chartYaw, bufYaw);
+                    drawn += flushDual(chartYaw, bufYawDual);
                     drawn += flushSingle(chartCross, bufCross);
                     drawn += flushSingle(chartAlong, bufAlong);
-                    drawn += flushDual(chartCurrVel, bufCurrVel);
+                    drawn += flushDual(chartWheelLeft, bufWheelLeft);
+                    drawn += flushDual(chartWheelRight, bufWheelRight);
                     drawn += flushDual(chartBytes, bufBytes);
                     if (drawn > 0) self.drawCount += drawn;
                 }, RENDER_MS);
@@ -208,7 +230,7 @@
                     var labels = { connected: 'MQTT OK', disconnected: 'Mất kết nối', reconnecting: 'Đang nối lại…', error: 'Lỗi' };
                     self.connLabel = labels[state] || state;
                     if (state === 'connected' && client) {
-                        ['heading', 'curr_vel', 'para', 'byte_per_sec'].forEach(function (k) {
+                        ['heading', 'curr_vel', 'vel', 'para', 'byte_per_sec'].forEach(function (k) {
                             var t = topicsMap[k];
                             if (t) client.subscribe(t, { qos: 0 });
                         });
@@ -232,16 +254,28 @@
                                 } else {
                                     yaw = pickNum(Number(String(raw).trim()));
                                 }
-                                if (yaw != null) bufYaw.push({ ts: ts, v: yaw });
+                                if (yaw != null) {
+                                    lastYawPlot = yaw;
+                                    bufYawDual.push({ ts: ts, v1: lastYawPlot, v2: lastDesiredHeadingPlot });
+                                }
                                 break;
 
                             case 'curr_vel':
                                 if (!o) break;
-                                bufCurrVel.push({
-                                    ts: ts,
-                                    v1: pickNum(o.left, o.left_vel),
-                                    v2: pickNum(o.right, o.right_vel)
-                                });
+                                var al = pickNum(o.left, o.left_vel);
+                                var ar = pickNum(o.right, o.right_vel);
+                                if (al != null) lastActLeft = al;
+                                if (ar != null) lastActRight = ar;
+                                pushWheelSamples(ts);
+                                break;
+
+                            case 'vel':
+                                if (!o) break;
+                                var kl = pickNum(o.left, o.left_vel);
+                                var kr = pickNum(o.right, o.right_vel);
+                                if (kl != null) lastCmdLeft = kl;
+                                if (kr != null) lastCmdRight = kr;
+                                pushWheelSamples(ts);
                                 break;
 
                             case 'para':
@@ -250,6 +284,11 @@
                                 var along = pickNum(o.along_track, o.alongTrack, o.along_track_m);
                                 if (cross != null) bufCross.push({ ts: ts, v: cross });
                                 if (along != null) bufAlong.push({ ts: ts, v: along });
+                                var dh = pickNum(o.desired_heading, o.desiredHeading);
+                                if (dh != null) {
+                                    lastDesiredHeadingPlot = dh;
+                                    bufYawDual.push({ ts: ts, v1: lastYawPlot, v2: lastDesiredHeadingPlot });
+                                }
                                 break;
 
                             case 'byte_per_sec':

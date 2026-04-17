@@ -88,6 +88,7 @@ async def admin_orders(request: Request):
         "bookings": bookings,
         "bookings_json": json.dumps(bookings, ensure_ascii=False, default=str),
         "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "robot_status_ugv_topics": ROBOT_STATUS_UGV_TOPICS,
         **_mqtt_ctx(),
     }
     return templates.TemplateResponse(request, "admin/orders.html", ctx)

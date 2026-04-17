@@ -22,6 +22,7 @@ from app.config import (
     MQTT_PASSWORD,
     MQTT_TOPIC_PATH,
     MQTT_TOPIC_POSITION,
+    MQTT_TOPIC_GPS_BASE,
 )
 
 _TAG = "[MQTT-CLIENT]"
@@ -37,6 +38,7 @@ class _MqttService:
 
         self.robot_lat: Optional[float] = None
         self.robot_lon: Optional[float] = None
+        self.robot_alt: Optional[float] = None
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -98,6 +100,12 @@ class _MqttService:
                 if lat is not None and lon is not None:
                     self.robot_lat = float(lat)
                     self.robot_lon = float(lon)
+                alt = data.get("alt", data.get("altitude", data.get("msl")))
+                if alt is not None:
+                    try:
+                        self.robot_alt = float(alt)
+                    except (TypeError, ValueError):
+                        pass
             except Exception:
                 pass
 
@@ -118,6 +126,20 @@ class _MqttService:
         info = self._client.publish(MQTT_TOPIC_PATH, raw, qos=1)
         print(f"{_TAG} published path → {MQTT_TOPIC_PATH} ({len(raw)} bytes)")
         return info.rc == paho_mqtt.MQTT_ERR_SUCCESS
+
+    def publish_json(self, topic: str, payload: dict, qos: int = 1) -> bool:
+        """Publish a JSON object to an arbitrary topic."""
+        if self._client is None or not self._connected:
+            print(f"{_TAG} cannot publish — not connected")
+            return False
+        raw = json.dumps(payload)
+        info = self._client.publish(topic, raw, qos=qos)
+        print(f"{_TAG} published → {topic} ({len(raw)} bytes)")
+        return info.rc == paho_mqtt.MQTT_ERR_SUCCESS
+
+    def publish_gps_base(self, lat: float, lon: float, alt: float = 0.0) -> bool:
+        """Publish campus GPS origin to ``MQTT_TOPIC_GPS_BASE`` (UGV/position/gps/base)."""
+        return self.publish_json(MQTT_TOPIC_GPS_BASE, {"lat": lat, "lon": lon, "alt": alt}, qos=1)
 
 
 mqtt_service = _MqttService()

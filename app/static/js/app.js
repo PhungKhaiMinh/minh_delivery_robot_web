@@ -52,3 +52,18 @@ async function handleLogout() {
         window.location.href = '/login';
     }
 }
+
+/**
+ * Hiển thị lat/lon hoặc tọa độ cục bộ x,y đầy đủ theo độ chính xác float (không giới hạn 4 chữ số thập phân).
+ * Cắt số 0 thừa cuối dây; giá trị không hợp lệ trả về "—" hoặc chuỗi rỗng.
+ */
+function formatCoordDisplay(value, useDash) {
+    if (value == null || value === '') return useDash === false ? '' : '—';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return useDash === false ? String(value) : '—';
+    let s = n.toFixed(14);
+    if (s.indexOf('.') !== -1) s = s.replace(/0+$/, '').replace(/\.$/, '');
+    return s;
+}
+
+window.formatCoordDisplay = formatCoordDisplay;

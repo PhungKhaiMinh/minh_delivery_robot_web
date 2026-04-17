@@ -9,8 +9,12 @@
     "mqttPass": mqtt_password,
     "topicVel": "UGV/Control",
     "topicCalibHeading": "UGV/offset/calib_heading",
+    "topicHeading": "UGV/position/heading",
+    "topicDesiredHeading": "UGV/control/para",
+    "topicParaLos": "UGV/para/los",
+    "topicParaCan": "UGV/para/can",
 } %}
-<div class="max-w-xl mx-auto space-y-8" x-data='adminSettings({{ settings_cfg|tojson }})'>
+<div class="max-w-4xl mx-auto space-y-8" x-data='adminSettings({{ settings_cfg|tojson }})'>
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Settings</h1>
         <p class="text-sm text-slate-500 mt-1">
@@ -51,83 +55,208 @@
                     class="flex-1 py-2.5 rounded-lg text-sm transition-all"
                 >Thủ công (Manual)</button>
             </div>
-            <p class="text-xs text-slate-500 mt-2">Auto: robot chạy theo lộ trình / stack điều khiển của bạn. Manual: dùng tốc độ bánh và calib IMU bên dưới.</p>
+            <p class="text-xs text-slate-500 mt-2">Auto: robot chạy theo lộ trình / stack điều khiển. Manual: dùng tốc độ bánh bên dưới.</p>
         </div>
 
+        <!-- Manual: tốc độ bánh -->
         <div class="space-y-4" :class="mode !== 'manual' ? 'opacity-50 pointer-events-none' : ''">
             <p class="text-sm font-semibold text-slate-800">Tốc độ bánh (chỉ khi Manual)</p>
-            <p class="text-xs text-slate-500 -mt-2">Đơn vị do firmware quy ước (ví dụ RPM, duty %, m/s). Nhập số âm nếu robot hỗ trợ lùi.</p>
+            <p class="text-xs text-slate-500 -mt-2">Đơn vị do firmware quy ước. Nhập số âm nếu robot hỗ trợ lùi.</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <label class="block">
                     <span class="text-xs font-medium text-slate-600">Bánh trái (left_vel)</span>
-                    <input
-                        type="number"
-                        step="any"
-                        x-model.number="wheelLeft"
+                    <input type="number" step="any" x-model.number="wheelLeft"
                         :disabled="mode !== 'manual' || conn !== 'connected'"
                         class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-900 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 disabled:bg-slate-100"
-                        placeholder="0"
-                    />
+                        placeholder="0" />
                 </label>
                 <label class="block">
                     <span class="text-xs font-medium text-slate-600">Bánh phải (right_vel)</span>
-                    <input
-                        type="number"
-                        step="any"
-                        x-model.number="wheelRight"
+                    <input type="number" step="any" x-model.number="wheelRight"
                         :disabled="mode !== 'manual' || conn !== 'connected'"
                         class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-900 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 disabled:bg-slate-100"
-                        placeholder="0"
-                    />
+                        placeholder="0" />
                 </label>
             </div>
-            <button
-                type="button"
-                @click="publishVel()"
-                :disabled="mode !== 'manual' || conn !== 'connected' || publishing"
-                class="w-full sm:w-auto px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-sky-600 hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-                <span x-show="!publishing">Gửi lệnh điều khiển</span>
-                <span x-show="publishing">Đang gửi…</span>
-            </button>
-            <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="lastOk" x-text="lastOk"></p>
-
-            <!-- Calib heading IMU (inside Manual block) -->
-            <div class="border-t border-slate-200 pt-4 mt-2 space-y-3">
-                <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                    <span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span>
-                    Calib góc Yaw (IMU)
-                </p>
+            <!-- D-pad / phím mũi tên: giữ càng lâu tốc độ càng tăng (MQTT UGV/Control) -->
+            <div class="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+                <p class="text-sm font-semibold text-slate-800">Điều khiển nhanh (mũi tên / giữ chuột)</p>
                 <p class="text-xs text-slate-500">
-                    Gửi giá trị offset góc yaw lên <code class="bg-slate-200 px-1 rounded">UGV/offset/calib_heading</code>
-                    — firmware dùng giá trị này để calib heading IMU.
+                    Tiến/lùi: hai bánh cùng tốc độ, tăng dần tới <span class="font-mono" x-text="String(arrowMaxLinear)"></span>.
+                    Rẽ trái: phải = 2× trái (trái tối đa <span class="font-mono" x-text="String(arrowMaxTurnSlow)"></span>).
+                    Rẽ phải: trái = 2× phải. Thả phím / thả chuột → gửi 0.
+                    Có thể dùng phím <kbd class="px-1 bg-white border rounded text-[10px]">↑</kbd><kbd class="px-1 bg-white border rounded text-[10px]">↓</kbd><kbd class="px-1 bg-white border rounded text-[10px]">←</kbd><kbd class="px-1 bg-white border rounded text-[10px]">→</kbd> khi không gõ trong ô input.
                 </p>
-                <div class="flex flex-col sm:flex-row items-start sm:items-end gap-4">
-                    <label class="block flex-1 w-full sm:w-auto">
-                        <span class="text-xs font-medium text-slate-600">Giá trị calib (float, rad)</span>
-                        <input
-                            type="number"
-                            step="any"
-                            x-model.number="calibHeading"
+                <div class="flex justify-center select-none" @mouseleave="arrowPointerUp()">
+                    <div class="grid grid-cols-3 gap-2 w-[11.5rem]">
+                        <span></span>
+                        <button type="button" class="h-14 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl text-slate-700 hover:bg-sky-50 hover:border-sky-300 active:bg-sky-100 flex items-center justify-center disabled:opacity-40"
                             :disabled="mode !== 'manual' || conn !== 'connected'"
-                            class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-900 font-mono focus:ring-2 focus:ring-violet-500 focus:border-violet-500 disabled:bg-slate-100"
-                            placeholder="0.0"
-                        />
-                    </label>
-                    <button
-                        type="button"
-                        @click="publishCalib()"
-                        :disabled="mode !== 'manual' || conn !== 'connected' || publishingCalib"
-                        class="shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <span x-show="!publishingCalib">Gửi Calib</span>
-                        <span x-show="publishingCalib">Đang gửi…</span>
-                    </button>
+                            @mousedown.prevent="arrowPointerDown('up')" @mouseup.prevent="arrowPointerUp()" @touchstart.prevent="arrowPointerDown('up')" @touchend.prevent="arrowPointerUp()">↑</button>
+                        <span></span>
+                        <button type="button" class="h-14 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl text-slate-700 hover:bg-sky-50 hover:border-sky-300 active:bg-sky-100 flex items-center justify-center disabled:opacity-40"
+                            :disabled="mode !== 'manual' || conn !== 'connected'"
+                            @mousedown.prevent="arrowPointerDown('left')" @mouseup.prevent="arrowPointerUp()" @touchstart.prevent="arrowPointerDown('left')" @touchend.prevent="arrowPointerUp()">←</button>
+                        <button type="button" class="h-14 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl text-slate-700 hover:bg-sky-50 hover:border-sky-300 active:bg-sky-100 flex items-center justify-center disabled:opacity-40"
+                            :disabled="mode !== 'manual' || conn !== 'connected'"
+                            @mousedown.prevent="arrowPointerDown('down')" @mouseup.prevent="arrowPointerUp()" @touchstart.prevent="arrowPointerDown('down')" @touchend.prevent="arrowPointerUp()">↓</button>
+                        <button type="button" class="h-14 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl text-slate-700 hover:bg-sky-50 hover:border-sky-300 active:bg-sky-100 flex items-center justify-center disabled:opacity-40"
+                            :disabled="mode !== 'manual' || conn !== 'connected'"
+                            @mousedown.prevent="arrowPointerDown('right')" @mouseup.prevent="arrowPointerUp()" @touchstart.prevent="arrowPointerDown('right')" @touchend.prevent="arrowPointerUp()">→</button>
+                    </div>
                 </div>
-                <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="calibOk" x-text="calibOk"></p>
-                <p class="text-xs text-red-600 min-h-[1rem]" x-show="calibError" x-text="calibError"></p>
+                <p class="text-center text-xs font-mono text-slate-600 min-h-[1.25rem]" x-text="arrowStatusLine"></p>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+                <button type="button"
+                    @click="streaming ? stopStream() : startStream()"
+                    :disabled="mode !== 'manual' || conn !== 'connected'"
+                    class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-colors"
+                    :class="streaming ? 'bg-red-600 hover:bg-red-700' : 'bg-sky-600 hover:bg-sky-700'">
+                    <span x-text="streaming ? '⏹ Dừng gửi' : '▶ Bắt đầu gửi (10 Hz)'"></span>
+                </button>
+                <span x-show="streaming" class="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Đang gửi liên tục 10 Hz
+                </span>
+            </div>
+            <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="lastOk" x-text="lastOk"></p>
+        </div>
+    </div>
+
+    <!-- Calib heading IMU — hoạt động ở cả Auto lẫn Manual -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-4">
+        <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span>
+            Calib góc Yaw (IMU) — Tự động
+        </p>
+        <p class="text-xs text-slate-500">
+            Hệ thống tự tính <code class="bg-slate-200 px-1 rounded">calib = desired_heading − heading</code> rồi gửi lên
+            <code class="bg-slate-200 px-1 rounded">UGV/offset/calib_heading</code>. Chỉ cần nhấn nút.
+        </p>
+
+        <!-- Realtime values -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="bg-slate-50 rounded-xl p-3">
+                <p class="text-xs font-medium text-slate-500">Heading hiện tại <span class="text-slate-400">(UGV/position/heading)</span></p>
+                <p class="mt-1 text-lg font-bold font-mono"
+                   :class="currentHeading !== null ? 'text-slate-900' : 'text-slate-400'"
+                   x-text="currentHeading !== null ? (currentHeading.toFixed(6) + ' rad') : 'Chưa nhận'"></p>
+                <p class="text-xs font-mono text-slate-500 mt-0.5"
+                   x-text="currentHeading !== null ? ('= ' + (currentHeading * 180 / Math.PI).toFixed(2) + '°') : ''"></p>
+            </div>
+            <div class="bg-violet-50 rounded-xl p-3">
+                <p class="text-xs font-medium text-violet-600">Desired heading <span class="text-violet-400">(UGV/control/para)</span></p>
+                <p class="mt-1 text-lg font-bold font-mono"
+                   :class="desiredHeading !== null ? 'text-violet-800' : 'text-slate-400'"
+                   x-text="desiredHeading !== null ? (desiredHeading.toFixed(6) + ' rad') : 'Chưa nhận'"></p>
+                <p class="text-xs font-mono text-violet-500 mt-0.5"
+                   x-text="desiredHeading !== null ? ('= ' + (desiredHeading * 180 / Math.PI).toFixed(2) + '°') : ''"></p>
             </div>
         </div>
+
+        <!-- Computed calib -->
+        <div class="bg-slate-100 rounded-xl p-3 flex items-center justify-between">
+            <div>
+                <p class="text-xs font-medium text-slate-600">Giá trị calib sẽ gửi <span class="text-slate-400">(desired − current)</span></p>
+                <p class="mt-1 text-xl font-bold font-mono"
+                   :class="calibReady ? 'text-violet-700' : 'text-slate-400'"
+                   x-text="calibReady ? (calibComputed.toFixed(6) + ' rad') : '(chờ dữ liệu…)'"></p>
+            </div>
+            <div class="flex gap-2">
+                <button type="button"
+                    @click="publishCalib()"
+                    :disabled="conn !== 'connected' || publishingCalib || !calibReady"
+                    class="shrink-0 px-6 py-3 rounded-xl text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                    <span x-show="!publishingCalib">Calib ngay</span>
+                    <span x-show="publishingCalib">Đang gửi…</span>
+                </button>
+                <button type="button"
+                    @click="resetCalib()"
+                    :disabled="conn !== 'connected' || publishingCalib"
+                    class="shrink-0 px-5 py-3 rounded-xl text-sm font-semibold text-slate-700 bg-slate-200 hover:bg-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                    Reset calib
+                </button>
+            </div>
+        </div>
+
+        <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="calibOk" x-text="calibOk"></p>
+        <p class="text-xs text-red-600 min-h-[1rem]" x-show="calibError" x-text="calibError"></p>
+    </div>
+
+    <!-- UGV/para/los -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-4">
+        <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+            Tham số LOS / điều hướng
+        </p>
+        <p class="text-xs text-slate-500">
+            Gửi JSON lên <code class="bg-slate-200 px-1 rounded" x-text="topicParaLos"></code>.
+            Chỉ các ô có nhập giá trị mới được đưa vào payload.
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <label class="block"><span class="text-xs font-medium text-slate-600">MAX_Linear</span>
+                <input type="text" inputmode="decimal" x-model="losPara.MAX_Linear" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">MAX_Angular</span>
+                <input type="text" inputmode="decimal" x-model="losPara.MAX_Angular" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">MAX_Pulse</span>
+                <input type="text" inputmode="decimal" x-model="losPara.MAX_Pulse" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">Period_Control_guidance</span>
+                <input type="text" inputmode="decimal" x-model="losPara.Period_Control_guidance" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">Period_Guidance</span>
+                <input type="text" inputmode="decimal" x-model="losPara.Period_Guidance" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">LOS_Radius</span>
+                <input type="text" inputmode="decimal" x-model="losPara.LOS_Radius" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">LOS_CteScale_</span>
+                <input type="text" inputmode="decimal" x-model="losPara.LOS_CteScale_" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">LOS_MaxDelta_</span>
+                <input type="text" inputmode="decimal" x-model="losPara.LOS_MaxDelta_" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">LOS_MinDelta_</span>
+                <input type="text" inputmode="decimal" x-model="losPara.LOS_MinDelta_" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">PID_Kp</span>
+                <input type="text" inputmode="decimal" x-model="losPara.PID_Kp" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">PID_Kd</span>
+                <input type="text" inputmode="decimal" x-model="losPara.PID_Kd" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+            <button type="button" @click="publishLosPara()"
+                :disabled="conn !== 'connected' || publishingLos"
+                class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                <span x-show="!publishingLos">Gửi lên MQTT</span>
+                <span x-show="publishingLos">Đang gửi…</span>
+            </button>
+        </div>
+        <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="losOk" x-text="losOk"></p>
+        <p class="text-xs text-red-600 min-h-[1rem]" x-show="losError" x-text="losError"></p>
+    </div>
+
+    <!-- UGV/para/can -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-4">
+        <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+            Tham số CAN
+        </p>
+        <p class="text-xs text-slate-500">
+            Gửi JSON lên <code class="bg-slate-200 px-1 rounded" x-text="topicParaCan"></code>.
+            Chỉ các ô có nhập giá trị mới được đưa vào payload.
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+            <label class="block"><span class="text-xs font-medium text-slate-600">LoopSerialCan</span>
+                <input type="text" inputmode="decimal" x-model="canPara.LoopSerialCan" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">LoopSendVel</span>
+                <input type="text" inputmode="decimal" x-model="canPara.LoopSendVel" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500" spellcheck="false" /></label>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+            <button type="button" @click="publishCanPara()"
+                :disabled="conn !== 'connected' || publishingCan"
+                class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                <span x-show="!publishingCan">Gửi lên MQTT</span>
+                <span x-show="publishingCan">Đang gửi…</span>
+            </button>
+        </div>
+        <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="canOk" x-text="canOk"></p>
+        <p class="text-xs text-red-600 min-h-[1rem]" x-show="canError" x-text="canError"></p>
     </div>
 
     <details class="text-xs text-slate-500 bg-slate-50 rounded-xl p-4 border border-slate-200">
@@ -139,14 +268,39 @@
   "right_vel": 118
 }
 
-<span class="text-slate-400">// UGV/offset/calib_heading</span>
+<span class="text-slate-400">// UGV/offset/calib_heading  (auto: desired − current)</span>
 {
-  "calib": 0.157
-}</pre>
+  "calib": 0.157000
+}
+
+<span class="text-slate-400">// UGV/para/los (chỉ gửi key đã nhập)</span>
+{ "MAX_Linear": 1.2, "PID_Kp": 0.5 }
+
+<span class="text-slate-400">// UGV/para/can</span>
+{ "LoopSerialCan": 10, "LoopSendVel": 20 }</pre>
     </details>
 </div>
 
 <script>
+/*
+ * ═══════════════════════════════════════════════════════════════════════════
+ * Manual — D-pad / phím mũi tên (chỉnh tốc độ ramp & max tại đây)
+ * File: app/templates/admin/settings.html  (ngay trên function adminSettings)
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ARROW_RAMP_INTERVAL_MS — khoảng cách mỗi lần tăng tốc khi giữ phím (ms)
+ * ARROW_RAMP_STEP       — mỗi lần tick tăng “mức ramp” bao nhiêu (tiến/lùi: |L|=|R|;
+ *                          rẽ: ramp áp vào bánh chậm, bánh nhanh = × ARROW_TURN_FAST_RATIO)
+ * ARROW_MAX_LINEAR      — tiến/lùi: |left_vel| = |right_vel| tối đa
+ * ARROW_MAX_TURN_SLOW   — rẽ: bánh chậm tối đa (bánh nhanh tối đa = × ratio, tối đa 50)
+ * ARROW_TURN_FAST_RATIO — rẽ trái: right = left × ratio ; rẽ phải: left = right × ratio
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+var ARROW_RAMP_INTERVAL_MS = 100;
+var ARROW_RAMP_STEP = 2;
+var ARROW_MAX_LINEAR = 50;
+var ARROW_MAX_TURN_SLOW = 25;
+var ARROW_TURN_FAST_RATIO = 2;
+
 function adminSettings(cfg) {
     cfg = cfg || {};
     var wsUrl = cfg.wsUrl;
@@ -155,14 +309,61 @@ function adminSettings(cfg) {
     var mqttPass = cfg.mqttPass;
     var topicVel = cfg.topicVel || 'UGV/Control';
     var topicCalibHeading = cfg.topicCalibHeading || 'UGV/offset/calib_heading';
+    var topicHeading = cfg.topicHeading || 'UGV/position/heading';
+    var topicDesiredHeading = cfg.topicDesiredHeading || 'UGV/control/para';
+    var topicParaLos = cfg.topicParaLos || 'UGV/para/los';
+    var topicParaCan = cfg.topicParaCan || 'UGV/para/can';
+
+    function buildParaPayload(obj) {
+        var out = {};
+        if (!obj || typeof obj !== 'object') return out;
+        Object.keys(obj).forEach(function (k) {
+            var s = String(obj[k] != null ? obj[k] : '').trim();
+            if (s === '') return;
+            var n = Number(s.replace(',', '.'));
+            if (!Number.isNaN(n) && Number.isFinite(n)) out[k] = n;
+            else out[k] = s;
+        });
+        return out;
+    }
 
     return {
         topicVel: topicVel,
         topicCalibHeading: topicCalibHeading,
-        mode: 'auto',
-        wheelLeft: 0,
-        wheelRight: 0,
-        calibHeading: 0,
+        topicParaLos: topicParaLos,
+        topicParaCan: topicParaCan,
+        losPara: {
+            MAX_Linear: '',
+            MAX_Angular: '',
+            MAX_Pulse: '',
+            Period_Control_guidance: '',
+            Period_Guidance: '',
+            LOS_Radius: '',
+            LOS_CteScale_: '',
+            LOS_MaxDelta_: '',
+            LOS_MinDelta_: '',
+            PID_Kp: '',
+            PID_Kd: '',
+        },
+        canPara: {
+            LoopSerialCan: '',
+            LoopSendVel: '',
+        },
+        publishingLos: false,
+        publishingCan: false,
+        losOk: '',
+        losError: '',
+        canOk: '',
+        canError: '',
+        pointerArrowDir: null,
+        arrowKeys: { up: false, down: false, left: false, right: false },
+        arrowStatusLine: '',
+        mode: localStorage.getItem('admin_control_mode') || 'auto',
+        wheelLeft: parseFloat(localStorage.getItem('admin_wheel_left')) || 0,
+        wheelRight: parseFloat(localStorage.getItem('admin_wheel_right')) || 0,
+        streaming: window._velStream.isRunning(),
+        currentHeading: null,
+        desiredHeading: null,
         conn: 'disconnected',
         connLabel: 'Chưa kết nối',
         publishError: '',
@@ -172,7 +373,23 @@ function adminSettings(cfg) {
         calibOk: '',
         calibError: '',
         _client: null,
-        _debounce: null,
+
+        get calibReady() {
+            return this.currentHeading !== null && this.desiredHeading !== null;
+        },
+
+        get calibComputed() {
+            if (!this.calibReady) return 0;
+            return this.desiredHeading - this.currentHeading;
+        },
+
+        get arrowMaxLinear() {
+            return ARROW_MAX_LINEAR;
+        },
+
+        get arrowMaxTurnSlow() {
+            return ARROW_MAX_TURN_SLOW;
+        },
 
         init() {
             var self = this;
@@ -186,63 +403,225 @@ function adminSettings(cfg) {
                     error: 'Lỗi MQTT',
                 };
                 self.connLabel = labels[state] || state;
+                if (state === 'connected' && self._client) {
+                    self._client.subscribe(topicHeading, { qos: 0 });
+                    self._client.subscribe(topicDesiredHeading, { qos: 0 });
+                }
             }, { username: mqttUser || undefined, password: mqttPass !== undefined && mqttPass !== null ? mqttPass : undefined });
 
-            this.$watch('mode', function () {
-                self.publishVel();
-            });
+            if (this._client) {
+                this._client.on('message', function (t, msg) {
+                    var raw = msg.toString().trim();
 
-            this.$watch('wheelLeft', function () {
-                if (self.mode === 'manual') self._scheduleVel();
-            });
+                    if (t === topicHeading) {
+                        var val = _parseHeadingValue(raw);
+                        if (val !== null) self.currentHeading = val;
+                        return;
+                    }
 
-            this.$watch('wheelRight', function () {
-                if (self.mode === 'manual') self._scheduleVel();
-            });
-        },
-
-        _scheduleVel() {
-            var self = this;
-            if (this._debounce) clearTimeout(this._debounce);
-            this._debounce = setTimeout(function () {
-                self.publishVel();
-            }, 300);
-        },
-
-        publishVel() {
-            if (!this._client || this.conn !== 'connected') return;
-            var self = this;
-            this.publishing = true;
-            var payload = {
-                manual_mode: this.mode === 'manual',
-                left_vel: Number(this.wheelLeft) || 0,
-                right_vel: Number(this.wheelRight) || 0,
-            };
-            var body = JSON.stringify(payload);
-            try {
-                this._client.publish(topicVel, body, { qos: 1 }, function (err) {
-                    self.publishing = false;
-                    if (err) {
-                        self.publishError = err.message || 'Publish thất bại';
-                        self.lastOk = '';
-                    } else {
-                        self.publishError = '';
-                        self.lastOk = 'Đã gửi → ' + topicVel + ': ' + body;
+                    if (t === topicDesiredHeading) {
+                        try {
+                            var po = JSON.parse(raw);
+                            if (po && po.desired_heading != null) {
+                                self.desiredHeading = Number(po.desired_heading);
+                            }
+                        } catch (e) {}
+                        return;
                     }
                 });
-            } catch (e) {
-                this.publishing = false;
-                this.publishError = String(e);
+            }
+
+            this.$watch('mode', function (val) {
+                localStorage.setItem('admin_control_mode', val);
+                if (val === 'auto') {
+                    self._stopArrowMotor();
+                    window._velStream.stop();
+                    self.streaming = false;
+                }
+                window._velStream.publishOnce();
+            });
+
+            this.$watch('wheelLeft', function (val) {
+                localStorage.setItem('admin_wheel_left', val);
+            });
+
+            this.$watch('wheelRight', function (val) {
+                localStorage.setItem('admin_wheel_right', val);
+            });
+
+            self._arrowRamp = 0;
+            self._arrowLastDrive = null;
+            self._mqttArrowTimer = null;
+            self._onArrowKeyDown = function (e) { self._handleArrowKeyDown(e); };
+            self._onArrowKeyUp = function (e) { self._handleArrowKeyUp(e); };
+            window.addEventListener('keydown', self._onArrowKeyDown, true);
+            window.addEventListener('keyup', self._onArrowKeyUp, true);
+        },
+
+        _resolveActiveArrowDir() {
+            if (this.pointerArrowDir) return this.pointerArrowDir;
+            if (this.arrowKeys.up) return 'up';
+            if (this.arrowKeys.down) return 'down';
+            if (this.arrowKeys.left) return 'left';
+            if (this.arrowKeys.right) return 'right';
+            return null;
+        },
+
+        _publishManualWheels(L, R) {
+            var l = Number(L) || 0;
+            var r = Number(R) || 0;
+            this.wheelLeft = l;
+            this.wheelRight = r;
+            localStorage.setItem('admin_wheel_left', l);
+            localStorage.setItem('admin_wheel_right', r);
+            if (this.streaming) return;
+            if (!this._client || this.conn !== 'connected') return;
+            var body = JSON.stringify({
+                manual_mode: true,
+                left_vel: l,
+                right_vel: r,
+            });
+            try {
+                this._client.publish(topicVel, body, { qos: 1 });
+            } catch (e) {}
+        },
+
+        _arrowMotorTick() {
+            var dir = this._resolveActiveArrowDir();
+            if (!dir || this.mode !== 'manual') {
+                this._stopArrowMotor();
+                return;
+            }
+            if (dir !== this._arrowLastDrive) {
+                this._arrowLastDrive = dir;
+                this._arrowRamp = 0;
+            }
+            this._arrowRamp += ARROW_RAMP_STEP;
+            var L = 0;
+            var R = 0;
+            if (dir === 'up') {
+                var v = Math.min(this._arrowRamp, ARROW_MAX_LINEAR);
+                L = R = v;
+            } else if (dir === 'down') {
+                var vb = Math.min(this._arrowRamp, ARROW_MAX_LINEAR);
+                L = R = -vb;
+            } else if (dir === 'left') {
+                var s = Math.min(this._arrowRamp, ARROW_MAX_TURN_SLOW);
+                L = s;
+                R = Math.min(s * ARROW_TURN_FAST_RATIO, ARROW_MAX_TURN_SLOW * ARROW_TURN_FAST_RATIO);
+            } else if (dir === 'right') {
+                var sr = Math.min(this._arrowRamp, ARROW_MAX_TURN_SLOW);
+                R = sr;
+                L = Math.min(sr * ARROW_TURN_FAST_RATIO, ARROW_MAX_TURN_SLOW * ARROW_TURN_FAST_RATIO);
+            }
+            this._publishManualWheels(L, R);
+            var label = dir === 'up' ? 'Tiến' : (dir === 'down' ? 'Lùi' : (dir === 'left' ? 'Trái' : 'Phải'));
+            this.arrowStatusLine = label + '  left=' + L + '  right=' + R;
+        },
+
+        _ensureArrowMotorTimer() {
+            var self = this;
+            if (this._mqttArrowTimer) return;
+            this._mqttArrowTimer = setInterval(function () {
+                self._arrowMotorTick();
+            }, ARROW_RAMP_INTERVAL_MS);
+            this._arrowMotorTick();
+        },
+
+        _stopArrowMotor() {
+            if (this._mqttArrowTimer) {
+                clearInterval(this._mqttArrowTimer);
+                this._mqttArrowTimer = null;
+            }
+            this._arrowRamp = 0;
+            this._arrowLastDrive = null;
+            this.pointerArrowDir = null;
+            this.arrowKeys = { up: false, down: false, left: false, right: false };
+            this.arrowStatusLine = '';
+            this._publishManualWheels(0, 0);
+            if (typeof window._velStream !== 'undefined' && window._velStream.publishOnce) {
+                window._velStream.publishOnce();
             }
         },
 
-        publishCalib() {
+        arrowPointerDown(dir) {
+            if (this.mode !== 'manual' || this.conn !== 'connected') return;
+            this.pointerArrowDir = dir;
+            this._ensureArrowMotorTimer();
+        },
+
+        arrowPointerUp() {
+            this.pointerArrowDir = null;
+            if (!this._resolveActiveArrowDir()) this._stopArrowMotor();
+        },
+
+        _handleArrowKeyDown(e) {
+            if (this.mode !== 'manual' || this.conn !== 'connected') return;
+            var tag = (e.target && e.target.tagName) || '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+            var k = e.key;
+            if (k !== 'ArrowUp' && k !== 'ArrowDown' && k !== 'ArrowLeft' && k !== 'ArrowRight') return;
+            if (e.repeat) return;
+            e.preventDefault();
+            if (k === 'ArrowUp') this.arrowKeys.up = true;
+            if (k === 'ArrowDown') this.arrowKeys.down = true;
+            if (k === 'ArrowLeft') this.arrowKeys.left = true;
+            if (k === 'ArrowRight') this.arrowKeys.right = true;
+            this._ensureArrowMotorTimer();
+        },
+
+        _handleArrowKeyUp(e) {
+            var k = e.key;
+            if (k === 'ArrowUp') this.arrowKeys.up = false;
+            if (k === 'ArrowDown') this.arrowKeys.down = false;
+            if (k === 'ArrowLeft') this.arrowKeys.left = false;
+            if (k === 'ArrowRight') this.arrowKeys.right = false;
+            if (!this._resolveActiveArrowDir()) this._stopArrowMotor();
+        },
+
+        startStream() {
+            window._velStream.start();
+            this.streaming = true;
+        },
+
+        stopStream() {
+            window._velStream.stop();
+            this.streaming = false;
+        },
+
+        resetCalib() {
             if (!this._client || this.conn !== 'connected') return;
             var self = this;
             this.publishingCalib = true;
             this.calibError = '';
             this.calibOk = '';
-            var val = parseFloat(this.calibHeading) || 0.0;
+            var body = '{"calib":0.000000}';
+            try {
+                this._client.publish(topicCalibHeading, body, { qos: 1 }, function (err) {
+                    self.publishingCalib = false;
+                    if (err) {
+                        self.calibError = err.message || 'Publish thất bại';
+                    } else {
+                        self.calibOk = 'Đã reset calib → ' + topicCalibHeading + ': ' + body;
+                    }
+                });
+            } catch (e) {
+                this.publishingCalib = false;
+                this.calibError = String(e);
+            }
+        },
+
+        publishCalib() {
+            if (!this._client || this.conn !== 'connected') return;
+            if (!this.calibReady) {
+                this.calibError = 'Chưa nhận đủ heading và desired_heading từ MQTT';
+                return;
+            }
+            var self = this;
+            this.publishingCalib = true;
+            this.calibError = '';
+            this.calibOk = '';
+            var val = this.calibComputed;
             var body = '{"calib":' + val.toFixed(6) + '}';
             try {
                 this._client.publish(topicCalibHeading, body, { qos: 1 }, function (err) {
@@ -250,15 +629,88 @@ function adminSettings(cfg) {
                     if (err) {
                         self.calibError = err.message || 'Publish thất bại';
                     } else {
-                        self.calibOk = 'Đã gửi → ' + topicCalibHeading + ': ' + body;
+                        self.calibOk = 'Đã gửi → ' + topicCalibHeading + ': ' + body +
+                            '  (desired=' + self.desiredHeading.toFixed(6) +
+                            ', current=' + self.currentHeading.toFixed(6) + ')';
                     }
                 });
             } catch (e) {
                 this.publishingCalib = false;
-                self.calibError = String(e);
+                this.calibError = String(e);
+            }
+        },
+
+        publishLosPara() {
+            if (!this._client || this.conn !== 'connected') return;
+            var payload = buildParaPayload(this.losPara);
+            if (Object.keys(payload).length === 0) {
+                this.losError = 'Nhập ít nhất một tham số.';
+                this.losOk = '';
+                return;
+            }
+            var self = this;
+            this.publishingLos = true;
+            this.losError = '';
+            this.losOk = '';
+            var body = JSON.stringify(payload);
+            try {
+                this._client.publish(topicParaLos, body, { qos: 1 }, function (err) {
+                    self.publishingLos = false;
+                    if (err) {
+                        self.losError = err.message || 'Publish thất bại';
+                    } else {
+                        self.losOk = 'Đã gửi → ' + topicParaLos + ': ' + body;
+                    }
+                });
+            } catch (e) {
+                this.publishingLos = false;
+                this.losError = String(e);
+            }
+        },
+
+        publishCanPara() {
+            if (!this._client || this.conn !== 'connected') return;
+            var payload = buildParaPayload(this.canPara);
+            if (Object.keys(payload).length === 0) {
+                this.canError = 'Nhập ít nhất một tham số.';
+                this.canOk = '';
+                return;
+            }
+            var self = this;
+            this.publishingCan = true;
+            this.canError = '';
+            this.canOk = '';
+            var body = JSON.stringify(payload);
+            try {
+                this._client.publish(topicParaCan, body, { qos: 1 }, function (err) {
+                    self.publishingCan = false;
+                    if (err) {
+                        self.canError = err.message || 'Publish thất bại';
+                    } else {
+                        self.canOk = 'Đã gửi → ' + topicParaCan + ': ' + body;
+                    }
+                });
+            } catch (e) {
+                this.publishingCan = false;
+                this.canError = String(e);
             }
         },
     };
+}
+
+function _parseHeadingValue(raw) {
+    var val = null;
+    try {
+        var o = JSON.parse(raw);
+        if (o && o.desired_heading != null) val = Number(o.desired_heading);
+        else if (o && o.heading != null) val = Number(o.heading);
+        else if (o && o.yaw != null) val = Number(o.yaw);
+    } catch (e) {}
+    if (val === null) {
+        var n = Number(raw);
+        if (!isNaN(n)) val = n;
+    }
+    return val;
 }
 </script>
 {% endblock %}

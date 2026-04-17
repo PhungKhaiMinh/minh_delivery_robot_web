@@ -72,12 +72,19 @@
             </template>
         </ul>
     </div>
-    <p class="text-xs text-slate-400">Payload mẫu: <code>{"lat":10.7724,"lon":106.658}</code></p>
+    <p class="text-xs text-slate-400">Payload mẫu: <code>{"lat":10.77202433,"lon":106.65860867}</code></p>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
 (function () {
+    function fmtCoord(v) {
+        if (typeof window.formatCoordDisplay === 'function') return window.formatCoordDisplay(v);
+        if (v == null || v === '') return '';
+        var n = Number(v);
+        return Number.isFinite(n) ? String(n) : String(v);
+    }
+
     var CAMPUS_WAYPOINTS = [
         { lat: 10.77202433, lon: 106.65860867, name: 'B1' },
         { lat: 10.77213017, lon: 106.65878283, name: 'Fablab' },
@@ -164,10 +171,10 @@
                 color: '#fff',
                 weight: 2,
                 fillOpacity: 0.9,
-            }).addTo(map).bindPopup(
+            }            ).addTo(map).bindPopup(
                 '<b>' + (wp.name || 'Waypoint ' + i) + '</b><br>' +
-                'Lat: ' + wp.lat.toFixed(8) + '<br>' +
-                'Lon: ' + wp.lon.toFixed(8)
+                'Lat: ' + fmtCoord(wp.lat) + '<br>' +
+                'Lon: ' + fmtCoord(wp.lon)
             );
 
             if (wp.name) {
@@ -209,6 +216,8 @@
         ],
     };
 
+    var CUSTOM_ROUTE_COLOR = '#8b5cf6';
+
     function drawDemoRoutes(map, demoLayers, routeList) {
         var ff = FOOTBALL_FIELD;
         var latlngs = [];
@@ -241,7 +250,7 @@
                 radius: 7, fillColor: ff.color, color: '#fff', weight: 3, fillOpacity: 1,
             }).addTo(map).bindPopup(
                 '<b>' + pt.name + '</b><br>' +
-                'Lat: ' + pt.lat + '<br>Lon: ' + pt.lon
+                'Lat: ' + fmtCoord(pt.lat) + '<br>Lon: ' + fmtCoord(pt.lon)
             );
             demoLayers.push(marker);
 
@@ -260,6 +269,65 @@
             pickup: ff.label,
             status: 'Test (' + totalDist.toFixed(0) + 'm)',
             color: ff.color,
+        });
+
+        drawCustomRoute(map, demoLayers, routeList);
+    }
+
+    function drawCustomRoute(map, demoLayers, routeList) {
+        var raw = localStorage.getItem('custom_scenario_points');
+        if (!raw) return;
+        try { var pts = JSON.parse(raw); } catch (e) { return; }
+        if (!Array.isArray(pts) || pts.length < 2) return;
+
+        var latlngs = [];
+        for (var i = 0; i < pts.length; i++) {
+            latlngs.push([Number(pts[i].lat), Number(pts[i].lon)]);
+        }
+
+        var totalDist = 0;
+        for (var m = 1; m < latlngs.length; m++) {
+            totalDist += haversine(
+                { lat: latlngs[m - 1][0], lon: latlngs[m - 1][1] },
+                { lat: latlngs[m][0], lon: latlngs[m][1] }
+            );
+        }
+
+        var poly = L.polyline(latlngs, {
+            color: CUSTOM_ROUTE_COLOR, weight: 5, opacity: 0.9, dashArray: '8 5',
+        }).addTo(map);
+        poly.bindPopup(
+            '<b>[Test] Kịch bản tùy chỉnh</b><br>' +
+            'Waypoints: ' + latlngs.length + '<br>' +
+            'Tổng: ' + totalDist.toFixed(1) + ' m'
+        );
+        demoLayers.push(poly);
+
+        for (var c = 0; c < latlngs.length; c++) {
+            var label = 'Điểm ' + (c + 1);
+            var marker = L.circleMarker(latlngs[c], {
+                radius: 7, fillColor: CUSTOM_ROUTE_COLOR, color: '#fff', weight: 3, fillOpacity: 1,
+            }).addTo(map).bindPopup(
+                '<b>' + label + '</b><br>' +
+                'Lat: ' + fmtCoord(latlngs[c][0]) + '<br>Lon: ' + fmtCoord(latlngs[c][1])
+            );
+            demoLayers.push(marker);
+
+            L.marker(latlngs[c], {
+                icon: L.divIcon({
+                    className: 'campus-label',
+                    html: '<span style="color:' + CUSTOM_ROUTE_COLOR + '">' + label + '</span>',
+                    iconAnchor: [-8, 12],
+                }),
+                interactive: false,
+            }).addTo(map);
+        }
+
+        routeList.push({
+            id: 'demo-custom',
+            pickup: 'Kịch bản tùy chỉnh (' + latlngs.length + ' điểm)',
+            status: 'Test (' + totalDist.toFixed(0) + 'm)',
+            color: CUSTOM_ROUTE_COLOR,
         });
     }
 
@@ -347,6 +415,12 @@
                 addWaypoints(map);
                 drawDemoRoutes(map, demoLayers, self.routeList);
 
+                window.addEventListener('storage', function (e) {
+                    if (e.key === 'custom_scenario_points') {
+                        self._refreshCustomRoute();
+                    }
+                });
+
                 trailLine = L.polyline([], {
                     color: '#f97316',
                     weight: 3,
@@ -408,8 +482,8 @@
                         if (o.lat == null || lngVal == null) return;
                         var lat = Number(o.lat), lng = Number(lngVal);
 
-                        self.lastLat = lat.toFixed(6);
-                        self.lastLng = lng.toFixed(6);
+                        self.lastLat = fmtCoord(lat);
+                        self.lastLng = fmtCoord(lng);
                         robotMarker.setLatLng([lat, lng]);
                         map.panTo([lat, lng]);
 
@@ -432,6 +506,16 @@
                 trailCoords = [];
                 trailLine.setLatLngs([]);
                 this.trailCount = 0;
+            },
+
+            _refreshCustomRoute: function () {
+                var self = this;
+                for (var k = demoLayers.length - 1; k >= 0; k--) {
+                    map.removeLayer(demoLayers[k]);
+                }
+                demoLayers = [];
+                self.routeList = self.routeList.filter(function (r) { return r.id.indexOf('demo-') !== 0; });
+                drawDemoRoutes(map, demoLayers, self.routeList);
             },
 
             _loadRoutes: function () {

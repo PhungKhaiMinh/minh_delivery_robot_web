@@ -60,6 +60,112 @@
     </script>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <script src="/static/js/admin_mqtt.js"></script>
+    <script>
+    /* ── Persistent vel streaming (survives page navigation) ── */
+    (function () {
+        var INTERVAL_MS = 100;
+        var LS_STREAMING = 'admin_vel_streaming';
+        var LS_MODE = 'admin_control_mode';
+        var LS_LEFT = 'admin_wheel_left';
+        var LS_RIGHT = 'admin_wheel_right';
+        var TOPIC = 'UGV/Control';
+
+        var client = null;
+        var ready = false;
+        var timer = null;
+
+        function buildPayload() {
+            return JSON.stringify({
+                manual_mode: (localStorage.getItem(LS_MODE) || 'auto') === 'manual',
+                left_vel: parseFloat(localStorage.getItem(LS_LEFT)) || 0,
+                right_vel: parseFloat(localStorage.getItem(LS_RIGHT)) || 0,
+            });
+        }
+
+        /** Gói cuối khi dừng stream: luôn dừng bánh về 0 trên MQTT (giữ manual_mode theo UI). */
+        function buildZeroWheelPayload() {
+            return JSON.stringify({
+                manual_mode: (localStorage.getItem(LS_MODE) || 'auto') === 'manual',
+                left_vel: 0,
+                right_vel: 0,
+            });
+        }
+
+        function tryPublish(body) {
+            if (!client || !ready) return false;
+            try {
+                client.publish(TOPIC, body, { qos: 1 });
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function publishZeroWheelsWhenReady() {
+            var body = buildZeroWheelPayload();
+            if (tryPublish(body)) return;
+            if (!client) initClient();
+            var attempts = 0;
+            var iv = setInterval(function () {
+                attempts++;
+                if (tryPublish(body) || attempts > 20) clearInterval(iv);
+            }, 100);
+        }
+
+        function tick() {
+            if (!client || !ready) return;
+            try { client.publish(TOPIC, buildPayload(), { qos: 1 }); } catch (e) {}
+        }
+
+        function startTimer() {
+            if (timer) return;
+            timer = setInterval(tick, INTERVAL_MS);
+            tick();
+        }
+
+        function stopTimer() {
+            if (timer) { clearInterval(timer); timer = null; }
+        }
+
+        function initClient() {
+            client = window.AdminMqtt.connect('', '', function (state) {
+                ready = (state === 'connected');
+            });
+        }
+
+        if (localStorage.getItem(LS_STREAMING) === '1') {
+            initClient();
+            startTimer();
+        }
+
+        window._velStream = {
+            start: function () {
+                localStorage.setItem(LS_STREAMING, '1');
+                if (!client) initClient();
+                startTimer();
+            },
+            stop: function () {
+                localStorage.setItem(LS_STREAMING, '0');
+                stopTimer();
+                publishZeroWheelsWhenReady();
+            },
+            isRunning: function () {
+                return timer !== null;
+            },
+            publishOnce: function () {
+                if (!client) initClient();
+                var attempts = 0;
+                var iv = setInterval(function () {
+                    attempts++;
+                    if (ready || attempts > 20) {
+                        clearInterval(iv);
+                        if (ready) tick();
+                    }
+                }, 100);
+            },
+        };
+    })();
+    </script>
     {% block admin_scripts %}{% endblock %}
     <script>lucide.createIcons();</script>
 </body>
