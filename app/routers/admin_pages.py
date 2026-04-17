@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import (
+    IS_VERCEL,
     MQTT_WS_URL,
     MQTT_USERNAME,
     MQTT_PASSWORD,
@@ -59,6 +60,7 @@ def _mqtt_ctx() -> dict:
         "mqtt_password": MQTT_PASSWORD,
         "mqtt_use_server_bridge": MQTT_USE_SERVER_BRIDGE,
         "mqtt_bridge_path": MQTT_BRIDGE_WEB_PATH,
+        "is_vercel_deploy": IS_VERCEL,
         "mqtt_topic_status": MQTT_TOPIC_STATUS,
         "mqtt_topic_telemetry": MQTT_TOPIC_TELEMETRY,
         "mqtt_topic_position": MQTT_TOPIC_POSITION,

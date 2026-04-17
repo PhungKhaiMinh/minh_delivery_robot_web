@@ -47,6 +47,13 @@
             </header>
 
             <main class="flex-1 p-4 md:p-8 overflow-auto">
+                {% if is_vercel_deploy and mqtt_ws_url is defined and mqtt_ws_url[:5] == 'ws://' %}
+                <div class="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm" role="status">
+                    <p class="font-semibold">MQTT trên Vercel (HTTPS)</p>
+                    <p class="mt-1 text-amber-900/90">Trình duyệt chặn <code class="text-xs bg-amber-100 px-1 rounded">ws://</code> từ trang bảo mật. Hãy bật WebSocket TLS trên broker và đặt biến môi trường Vercel <code class="text-xs bg-amber-100 px-1 rounded">MQTT_WS_URL</code> dạng <code class="text-xs bg-amber-100 px-1 rounded">wss://host:port</code> (cùng user/pass như Mosquitto).</p>
+                    <p class="mt-1 text-xs text-amber-800/80">Bridge qua server (<code class="bg-amber-100 px-0.5 rounded">MQTT_USE_SERVER_BRIDGE=true</code>) thường không dùng được trên Vercel; mặc định deploy đã dùng kết nối trực tiếp mqtt.js.</p>
+                </div>
+                {% endif %}
                 {% block admin_content %}{% endblock %}
             </main>
         </div>
