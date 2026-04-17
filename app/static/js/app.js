@@ -3,6 +3,17 @@
  * Quản lý Toast notifications, Logout, và các tiện ích chung.
  */
 
+// Lấy cấu hình từ API hoặc biến môi trường truyền xuống
+const client = mqtt.connect('wss://45.117.177.157:8884', {
+    username: 'client',
+    password: 'viam1234',
+    clientId: 'web_client_' + Math.random().toString(16).substr(2, 8)
+});
+
+client.on('connect', () => {
+    console.log('Đã kết nối MQTT thành công từ trình duyệt!');
+    client.subscribe('robot/status');
+});
 // === Toast Notification System ===
 function showToast(message, type = 'info', duration = 3000) {
     const container = document.getElementById('toast-container');

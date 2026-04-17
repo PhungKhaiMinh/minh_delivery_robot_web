@@ -78,12 +78,17 @@
         </div>
     </div>
 
-    <!-- IMU heading -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <!-- IMU heading + GPS heading yaw -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Heading (IMU yaw)</h2>
             <p class="text-xs text-slate-400 mb-1">UGV/position/heading</p>
             <p class="text-3xl font-bold text-violet-700 font-mono" x-text="yaw != null ? (yaw.toFixed(4) + ' rad') : '—'"></p>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm border-l-4 border-l-emerald-500">
+            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Heading (GPS yaw)</h2>
+            <p class="text-xs text-slate-400 mb-1">UGV/position/heading_gps · key <code class="bg-slate-100 px-1 rounded">heading</code></p>
+            <p class="text-3xl font-bold text-emerald-700 font-mono" x-text="yawGps != null ? (yawGps.toFixed(4) + ' rad') : '—'"></p>
         </div>
     </div>
 
@@ -258,6 +263,7 @@
             localX: null,
             localY: null,
             yaw: null,
+            yawGps: null,
             velRealLeft: null,
             velRealRight: null,
             velCtrlLeft: null,
@@ -323,6 +329,10 @@
                         break;
                     case 'heading':
                         this.yaw = pickNum(o.heading, o.yaw);
+                        touch();
+                        break;
+                    case 'heading_gps':
+                        this.yawGps = pickNum(o.heading, o.yaw);
                         touch();
                         break;
                     case 'curr_vel':
@@ -403,6 +413,9 @@
                         if (!o) {
                             const n = Number(String(raw).trim());
                             if (!Number.isNaN(n) && key === 'heading') {
+                                pendingUpdates[key] = { heading: n };
+                            }
+                            if (!Number.isNaN(n) && key === 'heading_gps') {
                                 pendingUpdates[key] = { heading: n };
                             }
                             return;

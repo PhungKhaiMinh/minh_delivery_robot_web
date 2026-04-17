@@ -91,6 +91,21 @@
             onConnState('error', 'mqtt.js chưa được tải');
             return null;
         }
+        var url = (wsUrl != null ? String(wsUrl).trim() : '');
+        if (!url) {
+            onConnState(
+                'error',
+                'Thiếu MQTT_WS_URL trên server — với direct mode cần biến Vercel MQTT_WS_URL=wss://... hoặc bật bridge (MQTT_USE_SERVER_BRIDGE=true).'
+            );
+            return null;
+        }
+        if (global.location.protocol === 'https:' && url.indexOf('ws://') === 0) {
+            onConnState(
+                'error',
+                'Trang HTTPS không dùng được ws:// — đặt MQTT_WS_URL dạng wss://... hoặc bật MQTT_USE_SERVER_BRIDGE=true (bridge qua cùng host).'
+            );
+            return null;
+        }
         var clientId = (clientIdPrefix || 'bookbot') + '-' + randomSuffix();
         auth = auth || {};
         var opts = {
@@ -104,7 +119,7 @@
         if (auth.password != null && String(auth.password) !== '') {
             opts.password = String(auth.password);
         }
-        var client = mqtt.connect(wsUrl, opts);
+        var client = mqtt.connect(url, opts);
         client.on('connect', function () { onConnState('connected'); });
         client.on('reconnect', function () { onConnState('reconnecting'); });
         client.on('close', function () { onConnState('disconnected'); });
