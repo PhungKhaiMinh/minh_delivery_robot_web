@@ -102,7 +102,15 @@ ROBOT_SERVER_URL = os.getenv("ROBOT_SERVER_URL", "http://localhost:5001")
 MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "45.117.177.157")
 MQTT_BROKER_PORT_TCP = int(os.getenv("MQTT_BROKER_PORT_TCP", "1883"))
 MQTT_WS_PORT = int(os.getenv("MQTT_WS_PORT", "9001"))
-MQTT_WS_URL = os.getenv("MQTT_WS_URL", "").strip() or f"ws://{MQTT_BROKER_HOST}:{MQTT_WS_PORT}"
+# Trình duyệt trên HTTPS (Vercel) chỉ cho phép wss:// — không dùng ws://.
+_mqtt_ws_explicit = os.getenv("MQTT_WS_URL", "").strip()
+if _mqtt_ws_explicit:
+    MQTT_WS_URL = _mqtt_ws_explicit
+elif IS_VERCEL:
+    _wss_port = int(os.getenv("MQTT_WSS_PORT", "8884"))
+    MQTT_WS_URL = f"wss://{MQTT_BROKER_HOST}:{_wss_port}"
+else:
+    MQTT_WS_URL = f"ws://{MQTT_BROKER_HOST}:{MQTT_WS_PORT}"
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "client")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "viam1234")
 # Trình duyệt → WebSocket tới FastAPI → paho TCP 1883 (user/pass ở trên). Tắt nếu broker có MQTT-over-WS và dùng mqtt.js trực tiếp.

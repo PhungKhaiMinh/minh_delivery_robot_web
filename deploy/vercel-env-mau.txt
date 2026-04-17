@@ -1,0 +1,14 @@
+# Dán vào Vercel → Settings → Environment Variables (Production + Preview nếu cần).
+# Sau đó Redeploy. Đổi MQTT_WS_URL / MQTT_WSS_PORT cho khớp cổng WSS thật trên broker.
+
+MQTT_USE_SERVER_BRIDGE=false
+MQTT_BROKER_HOST=45.117.177.157
+MQTT_BROKER_PORT_TCP=1883
+MQTT_USERNAME=client
+MQTT_PASSWORD=viam1234
+
+# Khi broker đã bật WSS (ví dụ cổng 8884). Nếu không đặt dòng này, app Vercel dùng mặc định wss://45.117.177.157:8884
+MQTT_WS_URL=wss://45.117.177.157:8884
+
+# Hoặc chỉ đặt cổng WSS (khi không đặt MQTT_WS_URL):
+# MQTT_WSS_PORT=8884
