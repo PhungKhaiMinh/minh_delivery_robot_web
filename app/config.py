@@ -114,7 +114,7 @@ else:
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "client")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "viam1234")
 # Trình duyệt → WebSocket tới FastAPI → paho TCP 1883 (user/pass ở trên). Tắt nếu broker có MQTT-over-WS và dùng mqtt.js trực tiếp.
-# Trên Vercel: mặc định BẬT bridge — trình duyệt chỉ cần wss://cùng host (HTTPS), server nối TCP tới broker (không bắt buộc wss trên broker).
+# Mặc định BẬT bridge — trình duyệt wss://cùng host (HTTPS), server nối TCP tới broker (Railway/VPS/local đều dùng được).
 # Đặt MQTT_USE_SERVER_BRIDGE=false + MQTT_WS_URL=wss://... nếu muốn mqtt.js nối thẳng broker.
 _mqtt_bridge_raw = os.getenv("MQTT_USE_SERVER_BRIDGE", "true").strip().lower()
 MQTT_USE_SERVER_BRIDGE = _mqtt_bridge_raw not in ("0", "false", "no", "off")

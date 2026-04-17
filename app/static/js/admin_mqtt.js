@@ -95,7 +95,7 @@
         if (!url) {
             onConnState(
                 'error',
-                'Thiếu MQTT_WS_URL trên server — với direct mode cần biến Vercel MQTT_WS_URL=wss://... hoặc bật bridge (MQTT_USE_SERVER_BRIDGE=true).'
+                'Thiếu MQTT_WS_URL trên server — với direct mode cần biến môi trường MQTT_WS_URL=wss://... hoặc bật bridge (MQTT_USE_SERVER_BRIDGE=true).'
             );
             return null;
         }

@@ -197,3 +197,36 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 3000 --reload
 
 ### Q: MQTT broker là gì? Có cần cài không?
 **A:** MQTT broker (`45.117.177.157:1883`) đã được cấu hình sẵn trong `config.py`, chạy trên server riêng. Bạn **không cần cài** broker trên máy mình.
+
+---
+
+## Deploy lên Railway.com
+
+Railway chạy **một container Linux** với **uvicorn** (không phải serverless như Vercel): MQTT nền, scheduler và WebSocket bridge đều hoạt động bình thường khi **không** đặt biến `VERCEL=1`.
+
+### Bước A — Tạo project trên Railway
+
+1. Đăng nhập **https://railway.com** → **New Project** → **Deploy from GitHub repo** → chọn repo `minh_delivery_robot_web`.
+2. Railway tạo **service** (web). Vào **Variables** và thêm các biến giống production: `SECRET_KEY`, Firebase (`FIREBASE_SERVICE_ACCOUNT_JSON` hoặc file + `USE_FIRESTORE`), `MQTT_*`, v.v. (xem `app/config.py`).
+
+### Bước B — Port
+
+Railway inject sẵn **`PORT`**. Repo đã có:
+
+- **`Procfile`**: `web: uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}`
+- **`railway.toml`**: `startCommand` tương đương với `--host 0.0.0.0 --port $PORT`
+
+Nếu trong UI Railway bạn đặt **Custom Start Command**, hãy để trống hoặc trùng với trên để tránh ghi đè sai.
+
+### Bước C — Generate domain
+
+Trong service → **Settings** → **Networking** → **Generate Domain** (HTTPS). Mở URL public để kiểm tra.
+
+### Bước D — Firebase trên Railway
+
+- Không dùng file `firebase-service-account.json` trên đĩa container trừ khi bạn commit (không nên). Nên dán JSON vào biến **`FIREBASE_SERVICE_ACCOUNT_JSON`** hoặc **`FIREBASE_SERVICE_ACCOUNT_B64`** (code trong `app/config.py` đã hỗ trợ ghi ra `/tmp` khi deploy).
+
+### Ghi chú
+
+- **Không** cần `vercel.json` / `main.py` gốc repo — đã gỡ để tránh nhầm với deploy Vercel.
+- Nếu sau này bạn vẫn deploy song song lên Vercel, đặt `VERCEL=1` trên Vercel; Railway **không** set biến này.
