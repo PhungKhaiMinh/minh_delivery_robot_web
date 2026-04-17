@@ -241,11 +241,17 @@
             Gửi JSON lên <code class="bg-slate-200 px-1 rounded" x-text="topicParaCan"></code>.
             Chỉ các ô có nhập giá trị mới được đưa vào payload.
         </p>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-3xl">
             <label class="block"><span class="text-xs font-medium text-slate-600">LoopSerialCan</span>
                 <input type="text" inputmode="decimal" x-model="canPara.LoopSerialCan" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500" spellcheck="false" /></label>
             <label class="block"><span class="text-xs font-medium text-slate-600">LoopSendVel</span>
                 <input type="text" inputmode="decimal" x-model="canPara.LoopSendVel" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">safe_angle</span>
+                <input type="text" inputmode="decimal" x-model="canPara.safe_angle" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">safe_distance</span>
+                <input type="text" inputmode="decimal" x-model="canPara.safe_distance" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500" spellcheck="false" /></label>
+            <label class="block sm:col-span-2"><span class="text-xs font-medium text-slate-600">loop_calib_yaw</span>
+                <input type="text" inputmode="decimal" x-model="canPara.loop_calib_yaw" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500" spellcheck="false" /></label>
         </div>
         <div class="flex flex-wrap items-center gap-3">
             <button type="button" @click="publishCanPara()"
@@ -277,7 +283,7 @@
 { "MAX_Linear": 1.2, "PID_Kp": 0.5 }
 
 <span class="text-slate-400">// UGV/para/can</span>
-{ "LoopSerialCan": 10, "LoopSendVel": 20 }</pre>
+{ "LoopSerialCan": 10, "LoopSendVel": 20, "safe_angle": 0.1, "safe_distance": 1.5, "loop_calib_yaw": 0.02 }</pre>
     </details>
 </div>
 
@@ -348,6 +354,9 @@ function adminSettings(cfg) {
         canPara: {
             LoopSerialCan: '',
             LoopSendVel: '',
+            safe_angle: '',
+            safe_distance: '',
+            loop_calib_yaw: '',
         },
         publishingLos: false,
         publishingCan: false,

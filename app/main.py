@@ -29,9 +29,9 @@ async def lifespan(app: FastAPI):
 
     if IS_VERCEL:
         print(
-            "[STARTUP] Vercel: bỏ qua MQTT client nền + scheduler "
-            "(serverless không giữ kết nối TCP / vòng lặp nền). "
-            "Dùng Firestore + MQTT qua trình duyệt (mqtt.js) nếu cần.\n"
+            "[STARTUP] Vercel: bỏ qua MQTT client nền + scheduler. "
+            "Admin MQTT: mặc định bridge (wss → /api/admin/mqtt-bridge → broker TCP). "
+            "Firestore + đăng nhập admin như bình thường.\n"
         )
     else:
         mqtt_service.start()
