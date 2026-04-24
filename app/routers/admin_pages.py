@@ -28,6 +28,7 @@ from app.config import (
     CAMPUS_ORIGIN_LON,
     CAMPUS_ORIGIN_ALT,
 )
+from app.routers.admin_api import get_football_scenario_display_rows
 from app.services.auth_service import get_current_user
 from app.services.booking_service import get_admin_queue_bookings
 
@@ -90,6 +91,7 @@ async def admin_orders(request: Request):
         "bookings": bookings,
         "bookings_json": json.dumps(bookings, ensure_ascii=False, default=str),
         "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "football_scenario_rows": get_football_scenario_display_rows(),
         "robot_status_ugv_topics": ROBOT_STATUS_UGV_TOPICS,
         **_mqtt_ctx(),
     }

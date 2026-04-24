@@ -27,6 +27,7 @@ from app.services.booking_service import get_admin_queue_bookings
 from app.services.pathfinding_service import (
     get_route_coords,
     convert_gps_list_to_payload,
+    gps_to_local,
     set_campus_gps_origin,
     get_campus_gps_origin,
 )
@@ -187,6 +188,37 @@ async def admin_set_campus_gps_origin(request: Request):
     )
 
 
+@router.post("/gps-to-local")
+async def admin_gps_to_local(request: Request):
+    """Lat/lon (WGS84) + alt → x,y local (m, North/East) theo gốc server hiện tại."""
+    require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    lat = body.get("lat")
+    lon = body.get("lon", body.get("lng"))
+    if lat is None or lon is None:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": "Cần lat và lon (hoặc lng)"},
+        )
+    alt = body.get("alt", 0.0)
+    try:
+        la = float(lat)
+        lo = float(lon)
+        al = float(alt) if alt is not None else 0.0
+    except (TypeError, ValueError):
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": "lat, lon, alt phải là số hợp lệ"},
+        )
+    x, y = gps_to_local(la, lo, al)
+    return JSONResponse(
+        content={"success": True, "x": x, "y": y},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test scenarios — kịch bản kiểm tra thực địa
 # ---------------------------------------------------------------------------
@@ -206,6 +238,43 @@ TEST_SCENARIOS: dict[str, dict] = {
         ],
     },
 }
+
+# Cùng thứ tự với TEST_SCENARIOS["football_field"]["waypoints"]
+FOOTBALL_WAYPOINT_NAMES: list[str] = [
+    "B1 (xuất phát)",
+    "Waypoint trung gian",
+    "Góc 3",
+    "Góc 2",
+    "Góc 1",
+    "Góc 4",
+    "→ Quay về WP trung gian",
+]
+
+
+def get_football_scenario_display_rows() -> list[dict]:
+    """Các điểm sân bóng với (x, y) local tại thời điểm render (theo gốc server hiện tại)."""
+    sc = TEST_SCENARIOS.get("football_field") or {}
+    wps: list = sc.get("waypoints") or []
+    rows: list[dict] = []
+    for i, w in enumerate(wps):
+        if len(w) < 2:
+            continue
+        lat, lon = float(w[0]), float(w[1])
+        x, y = gps_to_local(lat, lon)
+        name = (
+            FOOTBALL_WAYPOINT_NAMES[i]
+            if i < len(FOOTBALL_WAYPOINT_NAMES)
+            else f"Điểm {i + 1}"
+        )
+        rows.append(
+            {
+                "idx": i + 1,
+                "name": name,
+                "x": x,
+                "y": y,
+            }
+        )
+    return rows
 
 
 @router.post("/test-scenario/dispatch")
@@ -237,9 +306,48 @@ async def admin_dispatch_test_scenario(request: Request):
     })
 
 
+def _as_float(v):
+    if v is None:
+        return None
+    if isinstance(v, str) and not str(v).strip():
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _payload_from_local_xy_waypoints(waypoints: list) -> dict:
+    """Build MQTT path from local ENU (x=North, y=East) metres — trùng firmware/convert_gps_list_to_payload output."""
+    sx: list[float] = []
+    sy: list[float] = []
+    for i, wp in enumerate(waypoints):
+        x = _as_float(wp.get("x"))
+        y = _as_float(wp.get("y"))
+        if x is None or y is None:
+            raise ValueError(f"Waypoint {i+1} cần x, y số hợp lệ (local, mét)")
+        sx.append(x)
+        sy.append(y)
+    return {"stage_x": sx, "stage_y": sy}
+
+
+def _all_waypoints_valid_local_xy(waypoints: list) -> bool:
+    for w in waypoints:
+        if _as_float(w.get("x")) is None or _as_float(w.get("y")) is None:
+            return False
+    return bool(waypoints)
+
+
+def _all_waypoints_valid_gps(waypoints: list) -> bool:
+    for w in waypoints:
+        if _as_float(w.get("lat")) is None or _as_float(w.get("lon")) is None:
+            return False
+    return bool(waypoints)
+
+
 @router.post("/test-scenario/dispatch-custom")
 async def admin_dispatch_custom_scenario(request: Request):
-    """Nhận danh sách tọa độ GPS tùy chỉnh, convert → local XY, publish MQTT."""
+    """Nhận waypoints: (1) tọa độ local x,y (m) hoặc (2) lat,lon — publish MQTT path."""
     require_admin(request)
     body = await request.json()
     waypoints = body.get("waypoints", [])
@@ -250,18 +358,37 @@ async def admin_dispatch_custom_scenario(request: Request):
             content={"success": False, "message": "Cần ít nhất 2 waypoints"},
         )
 
-    points = []
-    for i, wp in enumerate(waypoints):
-        lat = wp.get("lat")
-        lon = wp.get("lon")
-        if lat is None or lon is None:
+    if _all_waypoints_valid_local_xy(waypoints):
+        try:
+            payload = _payload_from_local_xy_waypoints(waypoints)
+        except (ValueError, TypeError) as e:
             return JSONResponse(
                 status_code=400,
-                content={"success": False, "message": f"Waypoint {i+1} thiếu lat hoặc lon"},
+                content={"success": False, "message": str(e)},
             )
-        points.append((float(lat), float(lon)))
-
-    payload = convert_gps_list_to_payload(points)
+    elif _all_waypoints_valid_gps(waypoints):
+        points: list[tuple[float, float]] = []
+        for wp in waypoints:
+            la = _as_float(wp.get("lat"))
+            lo = _as_float(wp.get("lon"))
+            if la is None or lo is None:  # pragma: no cover
+                return JSONResponse(
+                    status_code=400,
+                    content={"success": False, "message": "Waypoint thiếu lat hoặc lon hợp lệ"},
+                )
+            points.append((la, lo))
+        payload = convert_gps_list_to_payload(points)
+    else:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "message": (
+                    "Các điểm phải cùng dạng: tất cả (x, y) local hợp lệ (m) **hoặc** tất cả (lat, lon) GPS. "
+                    "Nếu trộn dạng hoặc thiếu số, hãy kiểm tra từng dòng."
+                ),
+            },
+        )
     ok = mqtt_service.publish_path(payload)
     if not ok:
         return JSONResponse(
