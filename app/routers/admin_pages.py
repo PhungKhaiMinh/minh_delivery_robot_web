@@ -19,6 +19,7 @@ from app.config import (
     MQTT_TOPIC_STATUS,
     MQTT_TOPIC_TELEMETRY,
     MQTT_TOPIC_POSITION,
+    MQTT_UGV_TOPIC_POSE,
     MQTT_TOPIC_MOTORS,
     MQTT_TOPIC_COMMAND,
     MQTT_TOPIC_CONTROL,
@@ -65,6 +66,7 @@ def _mqtt_ctx() -> dict:
         "mqtt_topic_status": MQTT_TOPIC_STATUS,
         "mqtt_topic_telemetry": MQTT_TOPIC_TELEMETRY,
         "mqtt_topic_position": MQTT_TOPIC_POSITION,
+        "mqtt_topic_pose": MQTT_UGV_TOPIC_POSE,
         "mqtt_topic_motors": MQTT_TOPIC_MOTORS,
         "mqtt_topic_command": MQTT_TOPIC_COMMAND,
         "mqtt_topic_control": MQTT_TOPIC_CONTROL,
@@ -125,7 +127,9 @@ async def admin_tracking(request: Request):
         "user": user,
         "admin_page": "tracking",
         "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
-        "mqtt_topic_heading": ROBOT_STATUS_UGV_TOPICS["heading"],
+        "campus_origin_lat": CAMPUS_ORIGIN_LAT,
+        "campus_origin_lon": CAMPUS_ORIGIN_LON,
+        "mqtt_topic_pose": MQTT_UGV_TOPIC_POSE,
         **_mqtt_ctx(),
     }
     return templates.TemplateResponse(request, "admin/tracking.html", ctx)

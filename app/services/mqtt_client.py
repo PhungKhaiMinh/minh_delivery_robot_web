@@ -23,7 +23,9 @@ from app.config import (
     MQTT_TOPIC_PATH,
     MQTT_TOPIC_POSITION,
     MQTT_TOPIC_GPS_BASE,
+    MQTT_UGV_TOPIC_POSE,
 )
+from app.services.pathfinding_service import local_to_gps
 
 _TAG = "[MQTT-CLIENT]"
 
@@ -39,6 +41,9 @@ class _MqttService:
         self.robot_lat: Optional[float] = None
         self.robot_lon: Optional[float] = None
         self.robot_alt: Optional[float] = None
+        self.robot_pose_x: Optional[float] = None
+        self.robot_pose_y: Optional[float] = None
+        self.robot_pose_yaw: Optional[float] = None
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -87,13 +92,36 @@ class _MqttService:
         if rc == 0:
             self._connected = True
             client.subscribe(MQTT_TOPIC_POSITION, qos=0)
-            print(f"{_TAG} connected, subscribed {MQTT_TOPIC_POSITION}")
+            client.subscribe(MQTT_UGV_TOPIC_POSE, qos=0)
+            print(
+                f"{_TAG} connected, subscribed {MQTT_TOPIC_POSITION} + {MQTT_UGV_TOPIC_POSE}"
+            )
         else:
             print(f"{_TAG} connect rc={rc}")
 
     def _on_message(self, _client: paho_mqtt.Client, _ud: object, msg: paho_mqtt.MQTTMessage) -> None:
-        if msg.topic == MQTT_TOPIC_POSITION:
-            try:
+        try:
+            if msg.topic == MQTT_UGV_TOPIC_POSE:
+                data = json.loads(msg.payload)
+                if not isinstance(data, dict):
+                    return
+                x = data.get("x")
+                y = data.get("y")
+                yw = data.get("yaw")
+                if x is not None and y is not None:
+                    fx, fy = float(x), float(y)
+                    self.robot_pose_x, self.robot_pose_y = fx, fy
+                    try:
+                        self.robot_lat, self.robot_lon = local_to_gps(fx, fy)
+                    except Exception:
+                        pass
+                if yw is not None:
+                    try:
+                        self.robot_pose_yaw = float(yw)
+                    except (TypeError, ValueError):
+                        self.robot_pose_yaw = None
+                return
+            if msg.topic == MQTT_TOPIC_POSITION:
                 data = json.loads(msg.payload)
                 lat = data.get("lat")
                 lon = data.get("lon", data.get("lng"))
@@ -106,8 +134,8 @@ class _MqttService:
                         self.robot_alt = float(alt)
                     except (TypeError, ValueError):
                         pass
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     def _on_disconnect(self, _client: paho_mqtt.Client, _ud: object, rc: int) -> None:
         self._connected = False

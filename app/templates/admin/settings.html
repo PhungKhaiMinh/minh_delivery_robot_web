@@ -8,9 +8,6 @@
     "mqttUser": mqtt_username,
     "mqttPass": mqtt_password,
     "topicVel": "UGV/Control",
-    "topicCalibHeading": "UGV/offset/calib_heading",
-    "topicHeading": "UGV/position/heading",
-    "topicDesiredHeading": "UGV/control/para",
     "topicParaLos": "UGV/para/los",
     "topicParaCan": "UGV/para/can",
 } %}
@@ -34,7 +31,6 @@
             <span x-text="connLabel"></span>
         </span>
         <span class="text-xs text-slate-500">Vel: <code class="bg-slate-200 px-1 rounded" x-text="topicVel"></code></span>
-        <span class="text-xs text-slate-500">Calib: <code class="bg-slate-200 px-1 rounded" x-text="topicCalibHeading"></code></span>
     </div>
     <p class="text-xs text-red-600 min-h-[1rem]" x-show="publishError" x-text="publishError"></p>
 
@@ -123,66 +119,6 @@
             </div>
             <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="lastOk" x-text="lastOk"></p>
         </div>
-    </div>
-
-    <!-- Calib heading IMU — hoạt động ở cả Auto lẫn Manual -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-4">
-        <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span>
-            Calib góc Yaw (IMU) — Tự động
-        </p>
-        <p class="text-xs text-slate-500">
-            Hệ thống tự tính <code class="bg-slate-200 px-1 rounded">calib = desired_heading − heading</code> rồi gửi lên
-            <code class="bg-slate-200 px-1 rounded">UGV/offset/calib_heading</code>. Chỉ cần nhấn nút.
-        </p>
-
-        <!-- Realtime values -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div class="bg-slate-50 rounded-xl p-3">
-                <p class="text-xs font-medium text-slate-500">Heading hiện tại <span class="text-slate-400">(UGV/position/heading)</span></p>
-                <p class="mt-1 text-lg font-bold font-mono"
-                   :class="currentHeading !== null ? 'text-slate-900' : 'text-slate-400'"
-                   x-text="currentHeading !== null ? (currentHeading.toFixed(6) + ' rad') : 'Chưa nhận'"></p>
-                <p class="text-xs font-mono text-slate-500 mt-0.5"
-                   x-text="currentHeading !== null ? ('= ' + (currentHeading * 180 / Math.PI).toFixed(2) + '°') : ''"></p>
-            </div>
-            <div class="bg-violet-50 rounded-xl p-3">
-                <p class="text-xs font-medium text-violet-600">Desired heading <span class="text-violet-400">(UGV/control/para)</span></p>
-                <p class="mt-1 text-lg font-bold font-mono"
-                   :class="desiredHeading !== null ? 'text-violet-800' : 'text-slate-400'"
-                   x-text="desiredHeading !== null ? (desiredHeading.toFixed(6) + ' rad') : 'Chưa nhận'"></p>
-                <p class="text-xs font-mono text-violet-500 mt-0.5"
-                   x-text="desiredHeading !== null ? ('= ' + (desiredHeading * 180 / Math.PI).toFixed(2) + '°') : ''"></p>
-            </div>
-        </div>
-
-        <!-- Computed calib -->
-        <div class="bg-slate-100 rounded-xl p-3 flex items-center justify-between">
-            <div>
-                <p class="text-xs font-medium text-slate-600">Giá trị calib sẽ gửi <span class="text-slate-400">(desired − current)</span></p>
-                <p class="mt-1 text-xl font-bold font-mono"
-                   :class="calibReady ? 'text-violet-700' : 'text-slate-400'"
-                   x-text="calibReady ? (calibComputed.toFixed(6) + ' rad') : '(chờ dữ liệu…)'"></p>
-            </div>
-            <div class="flex gap-2">
-                <button type="button"
-                    @click="publishCalib()"
-                    :disabled="conn !== 'connected' || publishingCalib || !calibReady"
-                    class="shrink-0 px-6 py-3 rounded-xl text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                    <span x-show="!publishingCalib">Calib ngay</span>
-                    <span x-show="publishingCalib">Đang gửi…</span>
-                </button>
-                <button type="button"
-                    @click="resetCalib()"
-                    :disabled="conn !== 'connected' || publishingCalib"
-                    class="shrink-0 px-5 py-3 rounded-xl text-sm font-semibold text-slate-700 bg-slate-200 hover:bg-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                    Reset calib
-                </button>
-            </div>
-        </div>
-
-        <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="calibOk" x-text="calibOk"></p>
-        <p class="text-xs text-red-600 min-h-[1rem]" x-show="calibError" x-text="calibError"></p>
     </div>
 
     <!-- UGV/para/los -->
@@ -274,11 +210,6 @@
   "right_vel": 118
 }
 
-<span class="text-slate-400">// UGV/offset/calib_heading  (auto: desired − current)</span>
-{
-  "calib": 0.157000
-}
-
 <span class="text-slate-400">// UGV/para/los (chỉ gửi key đã nhập)</span>
 { "MAX_Linear": 1.2, "PID_Kp": 0.5 }
 
@@ -314,9 +245,6 @@ function adminSettings(cfg) {
     var mqttUser = cfg.mqttUser;
     var mqttPass = cfg.mqttPass;
     var topicVel = cfg.topicVel || 'UGV/Control';
-    var topicCalibHeading = cfg.topicCalibHeading || 'UGV/offset/calib_heading';
-    var topicHeading = cfg.topicHeading || 'UGV/position/heading';
-    var topicDesiredHeading = cfg.topicDesiredHeading || 'UGV/control/para';
     var topicParaLos = cfg.topicParaLos || 'UGV/para/los';
     var topicParaCan = cfg.topicParaCan || 'UGV/para/can';
 
@@ -335,7 +263,6 @@ function adminSettings(cfg) {
 
     return {
         topicVel: topicVel,
-        topicCalibHeading: topicCalibHeading,
         topicParaLos: topicParaLos,
         topicParaCan: topicParaCan,
         losPara: {
@@ -371,26 +298,12 @@ function adminSettings(cfg) {
         wheelLeft: parseFloat(localStorage.getItem('admin_wheel_left')) || 0,
         wheelRight: parseFloat(localStorage.getItem('admin_wheel_right')) || 0,
         streaming: window._velStream.isRunning(),
-        currentHeading: null,
-        desiredHeading: null,
         conn: 'disconnected',
         connLabel: 'Chưa kết nối',
         publishError: '',
         lastOk: '',
         publishing: false,
-        publishingCalib: false,
-        calibOk: '',
-        calibError: '',
         _client: null,
-
-        get calibReady() {
-            return this.currentHeading !== null && this.desiredHeading !== null;
-        },
-
-        get calibComputed() {
-            if (!this.calibReady) return 0;
-            return this.desiredHeading - this.currentHeading;
-        },
 
         get arrowMaxLinear() {
             return ARROW_MAX_LINEAR;
@@ -412,33 +325,7 @@ function adminSettings(cfg) {
                     error: 'Lỗi MQTT',
                 };
                 self.connLabel = labels[state] || state;
-                if (state === 'connected' && self._client) {
-                    self._client.subscribe(topicHeading, { qos: 0 });
-                    self._client.subscribe(topicDesiredHeading, { qos: 0 });
-                }
             }, { username: mqttUser || undefined, password: mqttPass !== undefined && mqttPass !== null ? mqttPass : undefined });
-
-            if (this._client) {
-                this._client.on('message', function (t, msg) {
-                    var raw = msg.toString().trim();
-
-                    if (t === topicHeading) {
-                        var val = _parseHeadingValue(raw);
-                        if (val !== null) self.currentHeading = val;
-                        return;
-                    }
-
-                    if (t === topicDesiredHeading) {
-                        try {
-                            var po = JSON.parse(raw);
-                            if (po && po.desired_heading != null) {
-                                self.desiredHeading = Number(po.desired_heading);
-                            }
-                        } catch (e) {}
-                        return;
-                    }
-                });
-            }
 
             this.$watch('mode', function (val) {
                 localStorage.setItem('admin_control_mode', val);
@@ -598,57 +485,6 @@ function adminSettings(cfg) {
             this.streaming = false;
         },
 
-        resetCalib() {
-            if (!this._client || this.conn !== 'connected') return;
-            var self = this;
-            this.publishingCalib = true;
-            this.calibError = '';
-            this.calibOk = '';
-            var body = '{"calib":0.000000}';
-            try {
-                this._client.publish(topicCalibHeading, body, { qos: 1 }, function (err) {
-                    self.publishingCalib = false;
-                    if (err) {
-                        self.calibError = err.message || 'Publish thất bại';
-                    } else {
-                        self.calibOk = 'Đã reset calib → ' + topicCalibHeading + ': ' + body;
-                    }
-                });
-            } catch (e) {
-                this.publishingCalib = false;
-                this.calibError = String(e);
-            }
-        },
-
-        publishCalib() {
-            if (!this._client || this.conn !== 'connected') return;
-            if (!this.calibReady) {
-                this.calibError = 'Chưa nhận đủ heading và desired_heading từ MQTT';
-                return;
-            }
-            var self = this;
-            this.publishingCalib = true;
-            this.calibError = '';
-            this.calibOk = '';
-            var val = this.calibComputed;
-            var body = '{"calib":' + val.toFixed(6) + '}';
-            try {
-                this._client.publish(topicCalibHeading, body, { qos: 1 }, function (err) {
-                    self.publishingCalib = false;
-                    if (err) {
-                        self.calibError = err.message || 'Publish thất bại';
-                    } else {
-                        self.calibOk = 'Đã gửi → ' + topicCalibHeading + ': ' + body +
-                            '  (desired=' + self.desiredHeading.toFixed(6) +
-                            ', current=' + self.currentHeading.toFixed(6) + ')';
-                    }
-                });
-            } catch (e) {
-                this.publishingCalib = false;
-                this.calibError = String(e);
-            }
-        },
-
         publishLosPara() {
             if (!this._client || this.conn !== 'connected') return;
             var payload = buildParaPayload(this.losPara);
@@ -705,21 +541,6 @@ function adminSettings(cfg) {
             }
         },
     };
-}
-
-function _parseHeadingValue(raw) {
-    var val = null;
-    try {
-        var o = JSON.parse(raw);
-        if (o && o.desired_heading != null) val = Number(o.desired_heading);
-        else if (o && o.heading != null) val = Number(o.heading);
-        else if (o && o.yaw != null) val = Number(o.yaw);
-    } catch (e) {}
-    if (val === null) {
-        var n = Number(raw);
-        if (!isNaN(n)) val = n;
-    }
-    return val;
 }
 </script>
 {% endblock %}

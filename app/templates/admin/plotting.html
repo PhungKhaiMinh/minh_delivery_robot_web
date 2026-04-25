@@ -66,8 +66,8 @@
                 <canvas id="plot-bytes" height="100"></canvas>
             </div>
             <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
-                <h2 class="text-sm font-semibold text-slate-800 mb-1">Góc Yaw IMU &amp; desired_heading / Time (s)</h2>
-                <p class="text-[11px] text-slate-400 mb-2">UGV/position/heading + UGV/control/para (desired_heading)</p>
+                <h2 class="text-sm font-semibold text-slate-800 mb-1">Góc yaw (pose) &amp; desired_heading / Time (s)</h2>
+                <p class="text-[11px] text-slate-400 mb-2">UGV/localization/pose (yaw) + UGV/control/para (desired_heading)</p>
                 <canvas id="plot-yaw" height="100"></canvas>
             </div>
         </div>
@@ -211,7 +211,7 @@
                 chartCross = mkChart('plot-cross', ['Cross track'], ['rgb(234,88,12)'], 'Cross track (m)');
                 chartAlong = mkChart('plot-along', ['Along track'], ['rgb(22,163,74)'], 'Along track (m)');
                 chartBytes = mkChart('plot-bytes', ['byte_sensor', 'byte_vel'], ['rgb(234,179,8)', 'rgb(20,184,166)'], 'byte/s');
-                chartYaw = mkChart('plot-yaw', ['Yaw IMU', 'desired_heading'], ['rgb(124,58,237)', 'rgb(245,158,11)'], 'Góc (rad)');
+                chartYaw = mkChart('plot-yaw', ['yaw (pose)', 'desired_heading'], ['rgb(124,58,237)', 'rgb(245,158,11)'], 'Góc (rad)');
 
                 setInterval(function () {
                     var drawn = 0;
@@ -230,7 +230,7 @@
                     var labels = { connected: 'MQTT OK', disconnected: 'Mất kết nối', reconnecting: 'Đang nối lại…', error: 'Lỗi' };
                     self.connLabel = labels[state] || state;
                     if (state === 'connected' && client) {
-                        ['heading', 'curr_vel', 'vel', 'para', 'byte_per_sec'].forEach(function (k) {
+                        ['pose', 'curr_vel', 'vel', 'para', 'byte_per_sec'].forEach(function (k) {
                             var t = topicsMap[k];
                             if (t) client.subscribe(t, { qos: 0 });
                         });
@@ -247,15 +247,11 @@
                         var ts = ((performance.now() - t0) / 1000).toFixed(1);
 
                         switch (key) {
-                            case 'heading':
-                                var yaw = null;
-                                if (o && typeof o === 'object') {
-                                    yaw = pickNum(o.heading, o.yaw);
-                                } else {
-                                    yaw = pickNum(Number(String(raw).trim()));
-                                }
-                                if (yaw != null) {
-                                    lastYawPlot = yaw;
+                            case 'pose':
+                                if (!o || typeof o !== 'object') break;
+                                var yPose = pickNum(o.yaw);
+                                if (yPose != null) {
+                                    lastYawPlot = yPose;
                                     bufYawDual.push({ ts: ts, v1: lastYawPlot, v2: lastDesiredHeadingPlot });
                                 }
                                 break;

@@ -144,6 +144,18 @@ def gps_to_local(lat: float, lon: float, alt: float = 0.0) -> tuple[float, float
     with _converter_lock:
         return _converter.convert(lat, lon, alt)
 
+
+def local_to_gps(north: float, east: float) -> tuple[float, float]:
+    """Gần đúng: (north, east) m trong ENU tại gốc hiện tại → (lat, lon) WGS84 (bản đồ OSM)."""
+    with _converter_lock:
+        rlat, rlon = _origin_lat, _origin_lon
+    # mét / độ — đủ chính xác với khoảng cách campus
+    m_per_deg_lat = 111_132.0
+    m_per_deg_lon = 111_320.0 * math.cos(math.radians(rlat))
+    if abs(m_per_deg_lon) < 1e-6:
+        m_per_deg_lon = 111_320.0
+    return rlat + north / m_per_deg_lat, rlon + east / m_per_deg_lon
+
 # ---------------------------------------------------------------------------
 # Adjacency + Dijkstra
 # ---------------------------------------------------------------------------

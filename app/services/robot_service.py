@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from app.config import ROBOT_SERVER_URL
 from app.services.db_service import db
 from app.models.robot import RobotStatus
+from app.services.mqtt_client import mqtt_service
 
 
 async def send_booking_to_robot(booking_id: str, booking_data: dict) -> tuple[bool, str]:
@@ -60,22 +61,55 @@ async def send_booking_to_robot(booking_id: str, booking_data: dict) -> tuple[bo
         return False, "Lỗi hệ thống khi giao tiếp với robot"
 
 
+def _pose_fields() -> dict:
+    out: dict = {}
+    if mqtt_service.robot_pose_x is not None:
+        out["x"] = mqtt_service.robot_pose_x
+    if mqtt_service.robot_pose_y is not None:
+        out["y"] = mqtt_service.robot_pose_y
+    if mqtt_service.robot_pose_yaw is not None:
+        out["yaw"] = mqtt_service.robot_pose_yaw
+    if mqtt_service.robot_lat is not None:
+        out["lat"] = mqtt_service.robot_lat
+    if mqtt_service.robot_lon is not None:
+        out["lng"] = mqtt_service.robot_lon
+    return out
+
+
 async def get_robot_position(robot_id: str) -> Optional[dict]:
     """
-    Lấy vị trí hiện tại của robot từ Robot Control Server.
-    Nếu server offline, lấy từ dữ liệu local.
+    Ưu tiên tọa độ từ MQTT UGV/localization/pose (x, y, yaw) và lat/lng suy từ gốc
+    (local_to_gps) cho bản đồ. Bổ sung pin/tốc độ từ server hoặc DB khi có.
     """
+    pose = _pose_fields()
+    if pose.get("x") is not None and pose.get("y") is not None:
+        out = {
+            "robot_id": robot_id,
+            **pose,
+            "battery": None,
+            "speed": 0.0,
+        }
+        try:
+            rdoc = db.collection("robots").document(robot_id).get()
+            if rdoc and rdoc.get("battery") is not None:
+                out["battery"] = rdoc.get("battery")
+        except Exception:
+            pass
+        return out
+
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(
                 f"{ROBOT_SERVER_URL}/api/robots/{robot_id}/position"
             )
         if response.status_code == 200:
-            return response.json()
+            d = response.json()
+            if isinstance(d, dict):
+                d.update(_pose_fields())
+            return d
     except Exception:
         pass
 
-    # Fallback: lấy vị trí từ local database
     robot_data = db.collection("robots").document(robot_id).get()
     if robot_data:
         return {
@@ -84,7 +118,10 @@ async def get_robot_position(robot_id: str) -> Optional[dict]:
             "lng": robot_data.get("current_lng", 106.6580),
             "battery": robot_data.get("battery", 0),
             "speed": 0.0,
+            **_pose_fields(),
         }
+    if pose:
+        return {"robot_id": robot_id, **pose, "battery": None, "speed": 0.0}
     return None
 
 

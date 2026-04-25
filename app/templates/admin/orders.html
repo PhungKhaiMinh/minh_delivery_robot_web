@@ -235,7 +235,7 @@
     "clientPrefix": mqtt_client_prefix,
     "mqttUser": mqtt_username,
     "mqttPass": mqtt_password,
-    "topicGps": robot_status_ugv_topics.gps,
+    "topicPose": robot_status_ugv_topics.pose,
 } %}
 <div class="max-w-7xl mx-auto mt-10 space-y-4" x-data='testScenarios({{ orders_test_cfg|tojson }})'>
     <div class="flex items-center gap-3">
@@ -243,27 +243,6 @@
         <span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold uppercase tracking-wide">Test</span>
     </div>
     <p class="text-sm text-slate-500">Gửi danh sách waypoints trực tiếp lên MQTT để kiểm tra xe chạy thực tế.</p>
-
-    <div class="rounded-xl border border-amber-200 bg-amber-50/90 p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-        <div class="text-xs text-amber-950 space-y-1 min-w-0">
-            <p class="font-semibold text-sm text-amber-950">Điểm gốc GPS → tọa độ x,y (server)</p>
-            <p class="text-amber-900/90">Nút bên phải lấy <strong>Lat/Lon mới nhất</strong> từ <span class="font-mono">UGV/position/gps</span> (cùng luồng với phần tùy chỉnh bên dưới), cập nhật thuật toán chuyển đổi trên server, rồi gửi gốc mới lên <span class="font-mono">UGV/position/gps/base</span>.</p>
-            <p class="text-emerald-800 font-medium" x-show="baseUpdateMessage" x-text="baseUpdateMessage"></p>
-        </div>
-        <button type="button"
-            @click="updateCampusBaseFromGps()"
-            :disabled="gpsLiveLat == null || gpsLiveLon == null || updatingBase"
-            class="shrink-0 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap"
-            :class="(gpsLiveLat == null || gpsLiveLon == null || updatingBase)
-                ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                : 'bg-amber-600 text-white hover:bg-amber-700 active:bg-amber-800'">
-            <span x-show="!updatingBase">Cập nhật tọa độ base mới</span>
-            <span x-show="updatingBase" class="flex items-center gap-2">
-                <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                Đang cập nhật…
-            </span>
-        </button>
-    </div>
 
     <!-- Scenario: Football field -->
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -274,7 +253,7 @@
                         <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
                         Chạy quanh sân bóng đá
                     </h3>
-                    <p class="text-xs text-slate-500 mt-1">Robot di chuyển qua 4 góc sân bóng trong khuôn viên trường rồi quay về điểm xuất phát. Tọa độ hiển thị là (x, y) local tính từ gốc trên server (Bắc, Đông, mét) — tải lại trang sau khi cập nhật điểm gốc base để số khớp.</p>
+                    <p class="text-xs text-slate-500 mt-1">Robot di chuyển qua 4 góc sân bóng trong khuôn viên trường rồi quay về điểm xuất phát. Bảng dưới: (x, y) tính từ server (met, Bắc/Đông) theo kịch bản GPS; khớp lộ trình tới robot.</p>
                 </div>
                 <button type="button"
                     @click="dispatch('football_field')"
@@ -338,7 +317,7 @@
                         <span class="w-3 h-3 rounded-full bg-violet-500"></span>
                         Kịch bản tùy chỉnh
                     </h3>
-                    <p class="text-xs text-slate-500 mt-1">Nhập từ 2 điểm trở lên (có thể thêm/bớt dòng). Tọa độ local (x, y) tính bằng mét (Bắc, Đông), trùng <code class="text-violet-800">stage_x</code> / <code class="text-violet-800">stage_y</code> trên robot. Bản nháp lưu trên trình duyệt; chỉ các dòng đủ X và Y hợp lệ mới gửi. Nút GPS: lấy Lat/Lon từ bản tin robot rồi <strong>server tính (x, y) theo gốc base hiện tại</strong> và gán vào dòng.</p>
+                    <p class="text-xs text-slate-500 mt-1">Nhập từ 2 điểm trở lên. (x, y) là mét, trùng <code class="text-violet-800">stage_x</code> / <code class="text-violet-800">stage_y</code>. Bản nháp lưu trên trình duyệt. Nút <strong>Pose</strong>: lấy trực tiếp x, y từ <code class="text-violet-800">UGV/localization/pose</code> (và gán điểm chọn tương ứng).</p>
                 </div>
                 <button type="button"
                     @click="dispatchCustom()"
@@ -364,36 +343,36 @@
             </div>
 
             <div class="rounded-xl border border-violet-200 bg-violet-50/60 p-3 space-y-2">
-                <p class="text-xs font-semibold text-violet-900">Gán tọa độ từ robot — <span class="font-normal text-violet-700">UGV/position/gps</span></p>
+                <p class="text-xs font-semibold text-violet-900">Pose mới nhất — <span class="font-mono text-violet-800">UGV/localization/pose</span></p>
                 <div class="flex flex-wrap items-center gap-2 text-xs">
                     <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium"
                         :class="{
-                            'bg-emerald-100 text-emerald-800': gpsConn === 'connected',
-                            'bg-amber-100 text-amber-800': gpsConn === 'reconnecting',
-                            'bg-slate-200 text-slate-600': gpsConn === 'disconnected',
-                            'bg-red-100 text-red-800': gpsConn === 'error',
+                            'bg-emerald-100 text-emerald-800': poseConn === 'connected',
+                            'bg-amber-100 text-amber-800': poseConn === 'reconnecting',
+                            'bg-slate-200 text-slate-600': poseConn === 'disconnected',
+                            'bg-red-100 text-red-800': poseConn === 'error',
                         }">
-                        <span class="w-1.5 h-1.5 rounded-full" :class="gpsConn === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
-                        <span x-text="gpsConnLabel"></span>
+                        <span class="w-1.5 h-1.5 rounded-full" :class="poseConn === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+                        <span x-text="poseConnLabel"></span>
                     </span>
-                    <span class="text-slate-600">Lat/Lon GPS từ robot (để tính x, y):</span>
-                    <span class="font-mono text-slate-800 break-all" x-text="gpsLiveSummary"></span>
+                    <span class="text-slate-600">x, y, yaw:</span>
+                    <span class="font-mono text-slate-800 break-all" x-text="poseLiveSummary"></span>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                     <label class="text-xs text-slate-600 shrink-0">Gán vào</label>
-                    <select x-model.number="gpsTargetIndex"
+                    <select x-model.number="poseTargetIndex"
                         class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white min-w-[7rem]">
                         <template x-for="(pt, idx) in customPoints" :key="pt._k">
                             <option :value="idx" x-text="'Điểm ' + (idx + 1)"></option>
                         </template>
                     </select>
-                    <button type="button" @click="applyGpsToTarget()"
+                    <button type="button" @click="applyPoseToTarget()"
                         class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-600 text-white hover:bg-violet-700">
-                        Gán GPS vào điểm đã chọn
+                        Gán pose vào điểm đã chọn
                     </button>
                 </div>
-                    <p class="text-[11px] text-slate-500">Hoặc dùng nút <strong class="text-violet-700">GPS</strong> cạnh mỗi dòng để tính (x, y) từ tọa độ robot và gán vào ô tương ứng.</p>
-                <p class="text-[11px] text-red-600" x-show="gpsErr" x-text="gpsErr"></p>
+                <p class="text-[11px] text-slate-500">Dùng nút <strong class="text-violet-700">Pose</strong> cạnh từng dòng để gán cùng nguồn dữ liệu.</p>
+                <p class="text-[11px] text-red-600" x-show="poseErr" x-text="poseErr"></p>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -408,10 +387,10 @@
                                 class="w-full min-w-[10rem] max-w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                                 placeholder="Y (Đông, m)" autocomplete="off" spellcheck="false" />
                         </div>
-                        <button type="button" @click="applyGpsToRow(idx)"
+                        <button type="button" @click="applyPoseToRow(idx)"
                             class="shrink-0 p-1.5 rounded-lg text-violet-600 hover:bg-violet-100 border border-transparent hover:border-violet-200"
-                            title="Tính (x, y) từ Lat/Lon GPS theo gốc base trên server và gán vào dòng này">
-                            <span class="text-[10px] font-bold leading-none">GPS</span>
+                            title="Gán x, y từ UGV/localization/pose vào dòng này">
+                            <span class="text-[10px] font-bold leading-none">Pose</span>
                         </button>
                         <button type="button" x-show="customPoints.length > 2" @click="removeWaypointRow(idx)"
                             class="shrink-0 p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
@@ -717,16 +696,6 @@ window._doDeleteOrder = async function (id) {
         return { x: sX, y: sY, _k: 'wp' + _wpId };
     }
 
-    function parseLatLonToNums(latStr, lonStr) {
-        var a = String(latStr != null ? latStr : '').trim().replace(',', '.');
-        var b = String(lonStr != null ? lonStr : '').trim().replace(',', '.');
-        if (!a || !b) return null;
-        var la = parseFloat(a);
-        var lo = parseFloat(b);
-        if (isNaN(la) || isNaN(lo)) return null;
-        return { lat: la, lon: lo };
-    }
-
     function pickNumGps() {
         for (var i = 0; i < arguments.length; i++) {
             var v = arguments[i];
@@ -737,7 +706,7 @@ window._doDeleteOrder = async function (id) {
 
     function testScenarios(cfg) {
         cfg = cfg || {};
-        var topicGps = cfg.topicGps || 'UGV/position/gps';
+        var topicPose = cfg.topicPose || 'UGV/localization/pose';
         var wsUrl = cfg.wsUrl || '';
         var clientPrefix = cfg.clientPrefix || '';
 
@@ -746,24 +715,21 @@ window._doDeleteOrder = async function (id) {
             lastScenario: null,
             lastResult: null,
             customPoints: [],
-            gpsConn: 'disconnected',
-            gpsConnLabel: 'Chưa kết nối',
-            gpsErr: '',
-            gpsLiveLat: null,
-            gpsLiveLon: null,
-            gpsLiveAlt: null,
-            updatingBase: false,
-            baseUpdateMessage: '',
-            gpsTargetIndex: 0,
-            _gpsClient: null,
+            poseConn: 'disconnected',
+            poseConnLabel: 'Chưa kết nối',
+            poseErr: '',
+            poseLiveX: null,
+            poseLiveY: null,
+            poseLiveYaw: null,
+            poseTargetIndex: 0,
+            _poseClient: null,
 
-            get gpsLiveSummary() {
-                if (this.gpsLiveLat == null || this.gpsLiveLon == null) return '—';
-                var f = window.formatCoordDisplay;
-                if (typeof f === 'function') {
-                    return f(this.gpsLiveLat) + ', ' + f(this.gpsLiveLon);
-                }
-                return String(this.gpsLiveLat) + ', ' + String(this.gpsLiveLon);
+            get poseLiveSummary() {
+                if (this.poseLiveX == null || this.poseLiveY == null) return '—';
+                var xs = this.poseLiveX.toFixed(4);
+                var ys = this.poseLiveY.toFixed(4);
+                var yw = this.poseLiveYaw != null ? (', yaw ' + this.poseLiveYaw.toFixed(4) + ' rad') : '';
+                return xs + ', ' + ys + yw;
             },
 
             stageJoin(arr) {
@@ -774,78 +740,22 @@ window._doDeleteOrder = async function (id) {
                 }).join(', ');
             },
 
-            async applyGpsToRow(idx) {
-                this.gpsErr = '';
-                if (this.gpsLiveLat == null || this.gpsLiveLon == null) {
-                    window.alert('Chưa có dữ liệu GPS từ UGV/position/gps (chờ robot hoặc kiểm tra MQTT).');
+            applyPoseToRow(idx) {
+                this.poseErr = '';
+                if (this.poseLiveX == null || this.poseLiveY == null) {
+                    window.alert('Chưa nhận được pose từ UGV/localization/pose (chờ robot / MQTT).');
                     return;
                 }
                 if (idx < 0 || idx >= this.customPoints.length) return;
-                try {
-                    var alt = this.gpsLiveAlt != null && !Number.isNaN(Number(this.gpsLiveAlt))
-                        ? Number(this.gpsLiveAlt) : 0;
-                    var res = await fetch('/api/admin/gps-to-local', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            lat: this.gpsLiveLat,
-                            lon: this.gpsLiveLon,
-                            alt: alt,
-                        }),
-                    });
-                    var data = await res.json().catch(function () { return {}; });
-                    if (!data.success) {
-                        this.gpsErr = data.message || ('Lỗi chuyển GPS→(x,y) ' + res.status);
-                        return;
-                    }
-                    this.customPoints[idx].x = String(data.x);
-                    this.customPoints[idx].y = String(data.y);
-                    this.saveDraft();
-                } catch (e) {
-                    this.gpsErr = (e && e.message) ? e.message : 'Lỗi mạng khi tính (x,y).';
-                }
+                this.customPoints[idx].x = this.poseLiveX.toFixed(4);
+                this.customPoints[idx].y = this.poseLiveY.toFixed(4);
+                this.saveDraft();
             },
 
-            async applyGpsToTarget() {
-                var i = Number(this.gpsTargetIndex);
+            applyPoseToTarget() {
+                var i = Number(this.poseTargetIndex);
                 if (Number.isNaN(i)) i = 0;
-                await this.applyGpsToRow(i);
-            },
-
-            async updateCampusBaseFromGps() {
-                if (this.gpsLiveLat == null || this.gpsLiveLon == null) {
-                    window.alert('Chưa có Lat/Lon từ UGV/position/gps — chờ robot hoặc kiểm tra MQTT.');
-                    return;
-                }
-                this.updatingBase = true;
-                this.baseUpdateMessage = '';
-                try {
-                    var alt = this.gpsLiveAlt != null && !Number.isNaN(Number(this.gpsLiveAlt))
-                        ? Number(this.gpsLiveAlt) : 0;
-                    var res = await fetch('/api/admin/campus-gps-origin', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            lat: this.gpsLiveLat,
-                            lon: this.gpsLiveLon,
-                            alt: alt,
-                        }),
-                    });
-                    var data = await res.json().catch(function () { return {}; });
-                    if (data.success) {
-                        this.baseUpdateMessage = data.message || 'Đã cập nhật. Đang tải lại trang để cập nhật tọa độ hiển thị…';
-                        setTimeout(function () { window.location.reload(); }, 500);
-                    } else {
-                        this.baseUpdateMessage = '';
-                        window.alert(data.message || ('Lỗi ' + res.status));
-                    }
-                } catch (e) {
-                    window.alert('Lỗi mạng: ' + (e && e.message ? e.message : String(e)));
-                } finally {
-                    this.updatingBase = false;
-                }
+                this.applyPoseToRow(i);
             },
 
             init() {
@@ -862,15 +772,6 @@ window._doDeleteOrder = async function (id) {
                                 if (xst && yst) {
                                     return newWaypointRow(p.x, p.y);
                                 }
-                                if (p && p.lat != null && String(p.lat).trim() !== '' && p.lon != null && String(p.lon).trim() !== '') {
-                                    var m = newWaypointRow();
-                                    var n = parseLatLonToNums(p.lat, p.lon);
-                                    if (n) {
-                                        m._migLat = n.lat;
-                                        m._migLon = n.lon;
-                                    }
-                                    return m;
-                                }
                                 return newWaypointRow();
                             });
                             loaded = true;
@@ -884,18 +785,18 @@ window._doDeleteOrder = async function (id) {
                 }
 
                 var mqttPass = cfg.mqttPass;
-                this._gpsClient = window.AdminMqtt.connect(wsUrl, clientPrefix, function (state, detail) {
-                    self.gpsConn = state;
-                    self.gpsErr = detail || '';
+                this._poseClient = window.AdminMqtt.connect(wsUrl, clientPrefix, function (state, detail) {
+                    self.poseConn = state;
+                    self.poseErr = detail || '';
                     var labels = {
                         connected: 'MQTT OK',
                         disconnected: 'Mất kết nối',
                         reconnecting: 'Đang nối lại…',
                         error: 'Lỗi',
                     };
-                    self.gpsConnLabel = labels[state] || state;
-                    if (state === 'connected' && self._gpsClient && topicGps) {
-                        self._gpsClient.subscribe(topicGps, { qos: 0 });
+                    self.poseConnLabel = labels[state] || state;
+                    if (state === 'connected' && self._poseClient && topicPose) {
+                        self._poseClient.subscribe(topicPose, { qos: 0 });
                     }
                 }, {
                     username: cfg.mqttUser || undefined,
@@ -903,58 +804,26 @@ window._doDeleteOrder = async function (id) {
                         ? String(mqttPass) : undefined,
                 });
 
-                if (this._gpsClient) {
-                    this._gpsClient.on('message', function (t, msg) {
-                        if (t !== topicGps) return;
+                if (this._poseClient) {
+                    this._poseClient.on('message', function (t, msg) {
+                        if (t !== topicPose) return;
                         var o = window.AdminMqtt.safeParseJson(msg.toString());
                         if (!o || typeof o !== 'object') return;
-                        var la = pickNumGps(o.lat, o.latitude);
-                        var lo = pickNumGps(o.lon, o.lng, o.longitude);
-                        var al = pickNumGps(o.alt, o.altitude, o.msl);
-                        if (la != null) self.gpsLiveLat = la;
-                        if (lo != null) self.gpsLiveLon = lo;
-                        if (al != null) self.gpsLiveAlt = al;
+                        var px = pickNumGps(o.x);
+                        var py = pickNumGps(o.y);
+                        var pYaw = o.yaw != null ? pickNumGps(o.yaw) : null;
+                        if (px != null) self.poseLiveX = px;
+                        if (py != null) self.poseLiveY = py;
+                        if (pYaw != null) self.poseLiveYaw = pYaw;
                     });
                 }
 
-                this.saveDraft();
-                setTimeout(function () { self._migrateLegacyLatLonRows(); }, 0);
-            },
-
-            async _migrateLegacyLatLonRows() {
-                for (var i = 0; i < this.customPoints.length; i++) {
-                    var p = this.customPoints[i];
-                    if (p._migLat == null || p._migLon == null) continue;
-                    try {
-                        var res = await fetch('/api/admin/gps-to-local', {
-                            method: 'POST',
-                            credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ lat: p._migLat, lon: p._migLon, alt: 0 }),
-                        });
-                        var data = await res.json().catch(function () { return {}; });
-                        if (data.success) {
-                            p.x = String(data.x);
-                            p.y = String(data.y);
-                            delete p._migLat;
-                            delete p._migLon;
-                        }
-                    } catch (e) { /* giữ _mig* nếu lỗi mạng; user có thể tải lại trang */ }
-                }
                 this.saveDraft();
             },
 
             saveDraft() {
                 try {
                     var pts = this.customPoints.map(function (p) {
-                        var xst = String(p.x != null ? p.x : '').trim();
-                        var yst = String(p.y != null ? p.y : '').trim();
-                        if (xst && yst) {
-                            return { x: p.x, y: p.y };
-                        }
-                        if (p._migLat != null && p._migLon != null) {
-                            return { lat: String(p._migLat), lon: String(p._migLon) };
-                        }
                         return { x: p.x, y: p.y };
                     });
                     localStorage.setItem(CUSTOM_DRAFT_LS, JSON.stringify({ points: pts }));
@@ -970,8 +839,8 @@ window._doDeleteOrder = async function (id) {
             removeWaypointRow(idx) {
                 if (this.customPoints.length <= 2) return;
                 this.customPoints.splice(idx, 1);
-                if (this.gpsTargetIndex >= this.customPoints.length) {
-                    this.gpsTargetIndex = Math.max(0, this.customPoints.length - 1);
+                if (this.poseTargetIndex >= this.customPoints.length) {
+                    this.poseTargetIndex = Math.max(0, this.customPoints.length - 1);
                 }
                 this.saveDraft();
             },

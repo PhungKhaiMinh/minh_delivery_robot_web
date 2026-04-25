@@ -130,7 +130,11 @@ MQTT_TOPIC_CONTROL = os.getenv("MQTT_TOPIC_CONTROL", "robot/control")
 MQTT_CLIENT_PREFIX = os.getenv("MQTT_CLIENT_PREFIX", "bookbot-admin")
 
 # Topic UGV — trang Admin Robot Status (subscribe từng topic, JSON theo firmware)
+# Vị trí + hướng từ bộ ước lượng (hiển thị chuẩn trên mọi trang)
+MQTT_UGV_TOPIC_POSE = os.getenv("MQTT_UGV_TOPIC_POSE", "UGV/localization/pose")
+
 ROBOT_STATUS_UGV_TOPICS = {
+    "pose": MQTT_UGV_TOPIC_POSE,
     "heading": os.getenv("MQTT_UGV_TOPIC_HEADING", "UGV/position/heading"),
     "heading_gps": os.getenv("MQTT_UGV_TOPIC_HEADING_GPS", "UGV/position/heading_gps"),
     "gps": os.getenv("MQTT_UGV_TOPIC_GPS", "UGV/position/gps"),

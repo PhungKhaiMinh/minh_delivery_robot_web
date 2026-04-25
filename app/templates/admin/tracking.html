@@ -17,15 +17,16 @@
 {% set tracking_cfg = {
     "wsUrl": mqtt_ws_url,
     "clientPrefix": mqtt_client_prefix,
-    "topic": mqtt_topic_position,
-    "topicHeading": mqtt_topic_heading,
+    "topicPose": mqtt_topic_pose,
+    "originLat": campus_origin_lat,
+    "originLon": campus_origin_lon,
     "mqttUser": mqtt_username,
     "mqttPass": mqtt_password,
 } %}
 <div class="max-w-7xl mx-auto space-y-6" x-data='adminTracking({{ tracking_cfg|tojson }})'>
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Tracking</h1>
-        <p class="text-sm text-slate-500 mt-1">Vị trí robot từ MQTT <code class="text-xs bg-slate-200 px-1 rounded" x-text="topic"></code></p>
+        <p class="text-sm text-slate-500 mt-1">Tọa độ &amp; hướng từ <code class="text-xs bg-slate-200 px-1 rounded" x-text="topicPoseLabel"></code> (x, y, yaw) — bản đồ dùng x,y chuyển tương đương sang lat/lon.</p>
     </div>
 
     <div class="flex flex-wrap items-center gap-3">
@@ -39,10 +40,7 @@
             <span class="w-2 h-2 rounded-full" :class="conn === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'"></span>
             <span x-text="connLabel"></span>
         </span>
-        <span class="text-sm text-slate-600" x-show="lastLat != null">Lat: <span x-text="lastLat"></span>, Lng: <span x-text="lastLng"></span></span>
-        <span class="text-sm text-slate-600" x-show="headingDeg !== null">
-            Heading: <span x-text="headingDeg"></span>°
-        </span>
+        <span class="text-sm text-slate-600 font-mono" x-show="poseX != null">x: <span x-text="poseX"></span> · y: <span x-text="poseY"></span> · yaw: <span x-text="poseYaw"></span> rad</span>
         <span class="text-xs text-slate-500" x-show="trailCount > 0">
             Quỹ đạo: <span x-text="trailCount"></span> điểm
         </span>
@@ -72,7 +70,7 @@
             </template>
         </ul>
     </div>
-    <p class="text-xs text-slate-400">Payload mẫu: <code>{"lat":10.77202433,"lon":106.65860867}</code></p>
+    <p class="text-xs text-slate-400">Payload: <code>{"x":0.0,"y":0.0,"yaw":0.0}</code> (4 chữ số thập phân trên bus)</p>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -367,10 +365,19 @@
         return svg;
     }
 
+    // Khớp pathfinding local_to_gps: x=North, y=East
+    function poseXYToLatLng(north, east, refLat, refLon) {
+        var mPerDegLat = 111132.0;
+        var mPerDegLon = 111320.0 * Math.cos(refLat * Math.PI / 180);
+        if (Math.abs(mPerDegLon) < 1e-6) mPerDegLon = 111320.0;
+        return [refLat + north / mPerDegLat, refLon + east / mPerDegLon];
+    }
+
     function adminTracking(cfg) {
         cfg = cfg || {};
-        var topic = cfg.topic || '';
-        var topicHeading = cfg.topicHeading || '';
+        var topicPose = cfg.topicPose || 'UGV/localization/pose';
+        var refLat = Number(cfg.originLat) || 10.77202433;
+        var refLon = Number(cfg.originLon) || 106.65860867;
 
         var map = null;
         var robotMarker = null;
@@ -393,13 +400,13 @@
         }
 
         return {
-            topic: topic,
+            topicPoseLabel: topicPose,
             conn: 'disconnected',
             connLabel: 'Chưa kết nối',
             errDetail: '',
-            lastLat: null,
-            lastLng: null,
-            headingDeg: null,
+            poseX: null,
+            poseY: null,
+            poseYaw: null,
             trailCount: 0,
             routeList: [],
 
@@ -448,42 +455,30 @@
                     var labels = { connected: 'MQTT OK', disconnected: 'Mất kết nối', reconnecting: 'Đang nối lại…', error: 'Lỗi' };
                     self.connLabel = labels[state] || state;
                     if (state === 'connected' && client) {
-                        client.subscribe(topic, { qos: 0 });
-                        if (topicHeading) client.subscribe(topicHeading, { qos: 0 });
+                        client.subscribe(topicPose, { qos: 0 });
                     }
                 });
 
                 if (client) {
                     client.on('message', function (t, msg) {
+                        if (t !== topicPose) return;
                         var raw = msg.toString();
-
-                        if (t === topicHeading) {
-                            var hVal = null;
-                            var ho = window.AdminMqtt.safeParseJson(raw);
-                            if (ho && ho.heading != null) {
-                                hVal = Number(ho.heading);
-                            } else {
-                                var n = Number(raw.trim());
-                                if (!isNaN(n)) hVal = n;
-                            }
-                            if (hVal != null) {
-                                var deg = hVal * 180 / Math.PI;
-                                currentHeadingDeg = deg;
-                                self.headingDeg = deg.toFixed(1);
-                                updateRobotIcon();
-                            }
-                            return;
-                        }
-
-                        if (t !== topic) return;
                         var o = window.AdminMqtt.safeParseJson(raw);
-                        if (!o) return;
-                        var lngVal = o.lng != null ? o.lng : o.lon;
-                        if (o.lat == null || lngVal == null) return;
-                        var lat = Number(o.lat), lng = Number(lngVal);
+                        if (!o || o.x == null || o.y == null) return;
+                        var nx = Number(o.x);
+                        var ny = Number(o.y);
+                        if (isNaN(nx) || isNaN(ny)) return;
+                        var yw = o.yaw != null && !isNaN(Number(o.yaw)) ? Number(o.yaw) : null;
+                        self.poseX = nx.toFixed(4);
+                        self.poseY = ny.toFixed(4);
+                        self.poseYaw = yw != null ? yw.toFixed(4) : '—';
 
-                        self.lastLat = fmtCoord(lat);
-                        self.lastLng = fmtCoord(lng);
+                        var ll = poseXYToLatLng(nx, ny, refLat, refLon);
+                        var lat = ll[0], lng = ll[1];
+                        var deg = yw != null ? (yw * 180 / Math.PI) : null;
+                        currentHeadingDeg = deg;
+                        updateRobotIcon();
+
                         robotMarker.setLatLng([lat, lng]);
                         map.panTo([lat, lng]);
 

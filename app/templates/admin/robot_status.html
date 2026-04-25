@@ -41,54 +41,44 @@
         <span class="text-xs text-red-600" x-show="errDetail" x-text="errDetail"></span>
     </div>
 
-    <!-- GPS -->
-    <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+    <!-- Vị trí & hướng: chỉ từ UGV/localization/pose -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm border-l-4 border-l-sky-500">
         <h2 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
-            <i data-lucide="map-pin" class="w-4 h-4 text-sky-600"></i> GPS
-            <span class="text-xs font-normal text-slate-400">UGV/position/gps</span>
-            <span class="text-xs font-normal text-slate-400">· mode từ UGV/state/gps</span>
+            <i data-lucide="crosshair" class="w-4 h-4 text-sky-600"></i>
+            Vị trí &amp; hướng (localization)
+            <span class="text-xs font-normal text-slate-400 font-mono">UGV/localization/pose</span>
         </h2>
-        <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-                <p class="text-xs font-medium text-slate-500">Chế độ tín hiệu</p>
-                <p class="mt-1">
-                    <span x-show="gpsMode == null" class="text-slate-400">—</span>
-                    <span x-show="gpsMode != null"
-                        class="inline-flex px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wide"
-                        :class="gpsModeClass"
-                        x-text="gpsModeLabel"></span>
-                </p>
+                <p class="text-xs font-medium text-slate-500">x (m)</p>
+                <p class="mt-1 font-mono text-xl font-bold text-sky-800" x-text="poseX != null ? poseX.toFixed(4) : '—'"></p>
             </div>
             <div>
-                <p class="text-xs font-medium text-slate-500">Vĩ độ (lat)</p>
-                <p class="mt-1 font-mono text-lg font-semibold text-slate-900 break-all" x-text="lat != null ? formatCoordDisplay(lat) : '—'"></p>
+                <p class="text-xs font-medium text-slate-500">y (m)</p>
+                <p class="mt-1 font-mono text-xl font-bold text-sky-800" x-text="poseY != null ? poseY.toFixed(4) : '—'"></p>
             </div>
             <div>
-                <p class="text-xs font-medium text-slate-500">Kinh độ (lon)</p>
-                <p class="mt-1 font-mono text-lg font-semibold text-slate-900 break-all" x-text="lon != null ? formatCoordDisplay(lon) : '—'"></p>
-            </div>
-            <div>
-                <p class="text-xs font-medium text-slate-500">X <span class="text-slate-400">(North, m)</span></p>
-                <p class="mt-1 font-mono text-lg font-semibold text-sky-700 break-all" x-text="localX != null ? formatCoordDisplay(localX) : '—'"></p>
-            </div>
-            <div>
-                <p class="text-xs font-medium text-slate-500">Y <span class="text-slate-400">(East, m)</span></p>
-                <p class="mt-1 font-mono text-lg font-semibold text-sky-700 break-all" x-text="localY != null ? formatCoordDisplay(localY) : '—'"></p>
+                <p class="text-xs font-medium text-slate-500">yaw (rad)</p>
+                <p class="mt-1 font-mono text-xl font-bold text-violet-700" x-text="poseYaw != null ? poseYaw.toFixed(4) : '—'"></p>
             </div>
         </div>
     </div>
 
-    <!-- IMU heading + GPS heading yaw -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Heading (IMU yaw)</h2>
-            <p class="text-xs text-slate-400 mb-1">UGV/position/heading</p>
-            <p class="text-3xl font-bold text-violet-700 font-mono" x-text="yaw != null ? (yaw.toFixed(4) + ' rad') : '—'"></p>
-        </div>
-        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm border-l-4 border-l-emerald-500">
-            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Heading (GPS yaw)</h2>
-            <p class="text-xs text-slate-400 mb-1">UGV/position/heading_gps · key <code class="bg-slate-100 px-1 rounded">heading</code></p>
-            <p class="text-3xl font-bold text-emerald-700 font-mono" x-text="yawGps != null ? (yawGps.toFixed(4) + ' rad') : '—'"></p>
+    <!-- Chế độ tín hiệu GPS (không hiển thị tọa độ tại đây) -->
+    <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+        <h2 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+            <i data-lucide="map-pin" class="w-4 h-4 text-slate-500"></i> Chế độ tín hiệu GPS
+            <span class="text-xs font-normal text-slate-400">UGV/state/gps</span>
+        </h2>
+        <div>
+            <p class="text-xs font-medium text-slate-500">mode_gps</p>
+            <p class="mt-1">
+                <span x-show="gpsMode == null" class="text-slate-400">—</span>
+                <span x-show="gpsMode != null"
+                    class="inline-flex px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wide"
+                    :class="gpsModeClass"
+                    x-text="gpsModeLabel"></span>
+            </p>
         </div>
     </div>
 
@@ -176,37 +166,6 @@
 
 <script>
 (function () {
-    /* ── ECEF→ENU converter (WGS84) — same algorithm as pathfinding_service.py ── */
-    var WGS84_A = 6378137.0;
-    var WGS84_E_SQ = 6.69437999014e-3;
-
-    function createEnuConverter(refLat, refLon, refAlt) {
-        var latR = refLat * Math.PI / 180;
-        var lonR = refLon * Math.PI / 180;
-        var sinLat = Math.sin(latR), cosLat = Math.cos(latR);
-        var sinLon = Math.sin(lonR), cosLon = Math.cos(lonR);
-        var Nref = WGS84_A / Math.sqrt(1 - WGS84_E_SQ * sinLat * sinLat);
-        var refX = (Nref + refAlt) * cosLat * cosLon;
-        var refY = (Nref + refAlt) * cosLat * sinLon;
-        var refZ = (Nref * (1 - WGS84_E_SQ) + refAlt) * sinLat;
-
-        return function (lat, lon, alt) {
-            alt = alt || 0;
-            var lr = lat * Math.PI / 180;
-            var lo = lon * Math.PI / 180;
-            var sla = Math.sin(lr), cla = Math.cos(lr);
-            var slo = Math.sin(lo), clo = Math.cos(lo);
-            var Np = WGS84_A / Math.sqrt(1 - WGS84_E_SQ * sla * sla);
-            var px = (Np + alt) * cla * clo;
-            var py = (Np + alt) * cla * slo;
-            var pz = (Np * (1 - WGS84_E_SQ) + alt) * sla;
-            var dx = px - refX, dy = py - refY, dz = pz - refZ;
-            var east  = -sinLon * dx + cosLon * dy;
-            var north = -sinLat * cosLon * dx - sinLat * sinLon * dy + cosLat * dz;
-            return { x: north, y: east };
-        };
-    }
-
     function pickNum() {
         for (let i = 0; i < arguments.length; i++) {
             const v = arguments[i];
@@ -242,9 +201,6 @@
         const topicsMap = cfg.topicsMap || {};
         const mqttUser = cfg.mqttUser;
         const mqttPass = cfg.mqttPass;
-        const gpsToLocal = createEnuConverter(
-            cfg.originLat || 0, cfg.originLon || 0, cfg.originAlt || 0
-        );
 
         return {
             formatCoordDisplay(v) {
@@ -258,12 +214,9 @@
             errDetail: '',
             lastMsgAt: '',
             gpsMode: null,
-            lat: null,
-            lon: null,
-            localX: null,
-            localY: null,
-            yaw: null,
-            yawGps: null,
+            poseX: null,
+            poseY: null,
+            poseYaw: null,
             velRealLeft: null,
             velRealRight: null,
             velCtrlLeft: null,
@@ -309,30 +262,24 @@
                 };
 
                 switch (key) {
+                    case 'pose':
+                        this.poseX = pickNum(o.x);
+                        this.poseY = pickNum(o.y);
+                        this.poseYaw = pickNum(o.yaw);
+                        touch();
+                        break;
                     case 'state_gps':
                         var modeVal = pickNum(o.mode_gps);
                         this.gpsMode = modeVal != null ? String(modeVal) : null;
                         touch();
                         break;
                     case 'gps':
-                        this.lat = pickNum(o.lat, o.latitude);
-                        this.lon = pickNum(o.lon, o.lng, o.longitude);
-                        if (this.lat != null && this.lon != null) {
-                            var enu = gpsToLocal(this.lat, this.lon);
-                            this.localX = enu.x;
-                            this.localY = enu.y;
-                        } else {
-                            this.localX = null;
-                            this.localY = null;
-                        }
                         touch();
                         break;
                     case 'heading':
-                        this.yaw = pickNum(o.heading, o.yaw);
                         touch();
                         break;
                     case 'heading_gps':
-                        this.yawGps = pickNum(o.heading, o.yaw);
                         touch();
                         break;
                     case 'curr_vel':

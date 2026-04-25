@@ -142,6 +142,10 @@
                                 <span class="text-sm text-gray-500">Tốc độ</span>
                                 <span class="text-sm font-medium text-gray-900" id="robot-speed">0.0 m/s</span>
                             </div>
+                            <div class="pt-2 border-t border-gray-100 space-y-1.5 text-xs">
+                                <p class="text-gray-500 font-medium">Tọa độ robot <span class="text-gray-400 font-normal">(UGV/localization/pose)</span></p>
+                                <p class="font-mono text-gray-900" id="robot-pose-line">x: — &nbsp; y: — &nbsp; yaw: —</p>
+                            </div>
                         </div>
                     </div>
                     
@@ -303,6 +307,17 @@ function connectWebSocket() {
 }
 
 function updateRobotPosition(pos) {
+    var pl = document.getElementById('robot-pose-line');
+    if (pl) {
+        var x = (pos.x != null && !isNaN(Number(pos.x))) ? Number(pos.x) : null;
+        var y = (pos.y != null && !isNaN(Number(pos.y))) ? Number(pos.y) : null;
+        var w = (pos.yaw != null && !isNaN(Number(pos.yaw))) ? Number(pos.yaw) : null;
+        if (x != null && y != null) {
+            pl.textContent = 'x: ' + x.toFixed(4) + '  y: ' + y.toFixed(4) + (w != null ? ('  yaw: ' + w.toFixed(4) + ' rad') : '  yaw: —');
+        } else {
+            pl.textContent = 'x: —  y: —  yaw: —';
+        }
+    }
     if (pos.lat && pos.lng) robotMarker.setLatLng([pos.lat, pos.lng]);
     if (pos.battery !== undefined) {
         document.getElementById('robot-battery-text').textContent = pos.battery + '%';
