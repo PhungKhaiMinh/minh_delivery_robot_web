@@ -103,6 +103,35 @@
                 </div>
                 <p class="text-center text-xs font-mono text-slate-600 min-h-[1.25rem]" x-text="arrowStatusLine"></p>
             </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+                <p class="text-sm font-semibold text-slate-800">Núm xoay ảo (joystick cho iPad)</p>
+                <p class="text-xs text-slate-500">
+                    Kéo núm như tay cầm gamepad để điều khiển analog. Tốc độ bánh được giới hạn trong
+                    [-<span class="font-mono" x-text="String(arrowMaxLinear)"></span>, +<span class="font-mono" x-text="String(arrowMaxLinear)"></span>].
+                    Thả tay → tự về 0.
+                </p>
+                <div class="flex justify-center select-none">
+                    <div
+                        class="relative w-44 h-44 rounded-full border border-slate-300 bg-white/80 shadow-inner touch-none"
+                        :class="(mode !== 'manual' || conn !== 'connected') ? 'opacity-40' : ''"
+                        style="touch-action:none;"
+                        @pointerdown.prevent="joystickPointerDown($event)"
+                        @pointermove.prevent="joystickPointerMove($event)"
+                        @pointerup.prevent="joystickPointerUp($event)"
+                        @pointercancel.prevent="joystickPointerUp($event)"
+                        @pointerleave.prevent="joystickPointerUp($event)"
+                    >
+                        <div class="absolute left-1/2 top-1/2 w-1 h-1 rounded-full bg-slate-400 -translate-x-1/2 -translate-y-1/2"></div>
+                        <div class="absolute inset-4 rounded-full border border-dashed border-slate-200"></div>
+                        <div
+                            class="absolute left-1/2 top-1/2 w-14 h-14 rounded-full bg-sky-500/90 border-2 border-white shadow-lg -translate-x-1/2 -translate-y-1/2 transition-transform"
+                            :class="joystickActive ? 'duration-75' : 'duration-150'"
+                            :style="'transform: translate(calc(-50% + ' + joystickDx.toFixed(1) + 'px), calc(-50% + ' + joystickDy.toFixed(1) + 'px));'"
+                        ></div>
+                    </div>
+                </div>
+                <p class="text-center text-xs font-mono text-slate-600 min-h-[1.25rem]" x-text="joystickStatusLine"></p>
+            </div>
 
             <div class="flex flex-wrap items-center gap-3">
                 <button type="button"
@@ -294,6 +323,12 @@ function adminSettings(cfg) {
         pointerArrowDir: null,
         arrowKeys: { up: false, down: false, left: false, right: false },
         arrowStatusLine: '',
+        joystickActive: false,
+        joystickPointerId: null,
+        joystickDx: 0,
+        joystickDy: 0,
+        joystickRadius: 56,
+        joystickStatusLine: '',
         mode: localStorage.getItem('admin_control_mode') || 'auto',
         wheelLeft: parseFloat(localStorage.getItem('admin_wheel_left')) || 0,
         wheelRight: parseFloat(localStorage.getItem('admin_wheel_right')) || 0,
@@ -331,6 +366,7 @@ function adminSettings(cfg) {
                 localStorage.setItem('admin_control_mode', val);
                 if (val === 'auto') {
                     self._stopArrowMotor();
+                    self._stopJoystick();
                     window._velStream.stop();
                     self.streaming = false;
                 }
@@ -449,6 +485,68 @@ function adminSettings(cfg) {
         arrowPointerUp() {
             this.pointerArrowDir = null;
             if (!this._resolveActiveArrowDir()) this._stopArrowMotor();
+        },
+
+        _applyJoystickFromEvent(e) {
+            var r = e.currentTarget.getBoundingClientRect();
+            var cx = r.left + (r.width / 2);
+            var cy = r.top + (r.height / 2);
+            var dx = e.clientX - cx;
+            var dy = e.clientY - cy;
+            var radius = this.joystickRadius;
+            var dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > radius && dist > 0) {
+                var k = radius / dist;
+                dx *= k;
+                dy *= k;
+            }
+            this.joystickDx = dx;
+            this.joystickDy = dy;
+
+            var nx = dx / radius;
+            var ny = dy / radius;
+            var dead = 0.08;
+            if (Math.abs(nx) < dead) nx = 0;
+            if (Math.abs(ny) < dead) ny = 0;
+
+            var throttle = -ny;
+            var turn = nx;
+            var max = ARROW_MAX_LINEAR;
+            var L = Math.max(-max, Math.min(max, (throttle + turn) * max));
+            var R = Math.max(-max, Math.min(max, (throttle - turn) * max));
+            this._publishManualWheels(Math.round(L), Math.round(R));
+            this.joystickStatusLine = 'Joy  left=' + Math.round(L) + '  right=' + Math.round(R);
+        },
+
+        _stopJoystick() {
+            this.joystickActive = false;
+            this.joystickPointerId = null;
+            this.joystickDx = 0;
+            this.joystickDy = 0;
+            this.joystickStatusLine = '';
+            this._publishManualWheels(0, 0);
+        },
+
+        joystickPointerDown(e) {
+            if (this.mode !== 'manual' || this.conn !== 'connected') return;
+            if (this.streaming) return;
+            this._stopArrowMotor();
+            this.joystickActive = true;
+            this.joystickPointerId = e.pointerId;
+            if (e.target && e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId);
+            this._applyJoystickFromEvent(e);
+        },
+
+        joystickPointerMove(e) {
+            if (!this.joystickActive) return;
+            if (this.joystickPointerId !== null && e.pointerId !== this.joystickPointerId) return;
+            this._applyJoystickFromEvent(e);
+        },
+
+        joystickPointerUp(e) {
+            if (!this.joystickActive) return;
+            if (this.joystickPointerId !== null && e.pointerId !== this.joystickPointerId) return;
+            this._stopJoystick();
         },
 
         _handleArrowKeyDown(e) {
