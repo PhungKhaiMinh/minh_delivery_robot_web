@@ -58,6 +58,16 @@
         <div class="space-y-4" :class="mode !== 'manual' ? 'opacity-50 pointer-events-none' : ''">
             <p class="text-sm font-semibold text-slate-800">Tốc độ bánh (chỉ khi Manual)</p>
             <p class="text-xs text-slate-500 -mt-2">Đơn vị do firmware quy ước. Nhập số âm nếu robot hỗ trợ lùi.</p>
+            <div class="max-w-xs">
+                <label class="block">
+                    <span class="text-xs font-medium text-slate-600">Tốc độ max khi điều khiển nhanh</span>
+                    <input type="number" min="1" max="50" step="1" x-model.number="controlMaxSpeed" inputmode="numeric"
+                        :disabled="mode !== 'manual'"
+                        class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-900 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 disabled:bg-slate-100"
+                        placeholder="50" />
+                </label>
+                <p class="mt-1 text-[11px] text-slate-500">Giới hạn cho cụm 4 hướng và joystick (1..50).</p>
+            </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <label class="block">
                     <span class="text-xs font-medium text-slate-600">Bánh trái (left_vel)</span>
@@ -112,7 +122,7 @@
                 </p>
                 <div class="flex justify-center select-none">
                     <div
-                        class="relative w-44 h-44 rounded-full border border-slate-300 bg-white/80 shadow-inner touch-none"
+                        class="relative w-56 h-56 rounded-full border border-slate-300 bg-white/80 shadow-inner touch-none"
                         :class="(mode !== 'manual' || conn !== 'connected') ? 'opacity-40' : ''"
                         style="touch-action:none;"
                         @pointerdown.prevent="joystickPointerDown($event)"
@@ -122,9 +132,9 @@
                         @pointerleave.prevent="joystickPointerUp($event)"
                     >
                         <div class="absolute left-1/2 top-1/2 w-1 h-1 rounded-full bg-slate-400 -translate-x-1/2 -translate-y-1/2"></div>
-                        <div class="absolute inset-4 rounded-full border border-dashed border-slate-200"></div>
+                        <div class="absolute inset-5 rounded-full border border-dashed border-slate-200"></div>
                         <div
-                            class="absolute left-1/2 top-1/2 w-14 h-14 rounded-full bg-sky-500/90 border-2 border-white shadow-lg -translate-x-1/2 -translate-y-1/2 transition-transform"
+                            class="absolute left-1/2 top-1/2 w-16 h-16 rounded-full bg-sky-500/90 border-2 border-white shadow-lg -translate-x-1/2 -translate-y-1/2 transition-transform"
                             :class="joystickActive ? 'duration-75' : 'duration-150'"
                             :style="'transform: translate(calc(-50% + ' + joystickDx.toFixed(1) + 'px), calc(-50% + ' + joystickDy.toFixed(1) + 'px));'"
                         ></div>
@@ -327,8 +337,9 @@ function adminSettings(cfg) {
         joystickPointerId: null,
         joystickDx: 0,
         joystickDy: 0,
-        joystickRadius: 56,
+        joystickRadius: 78,
         joystickStatusLine: '',
+        controlMaxSpeed: parseInt(localStorage.getItem('admin_control_max_speed') || '50', 10),
         mode: localStorage.getItem('admin_control_mode') || 'auto',
         wheelLeft: parseFloat(localStorage.getItem('admin_wheel_left')) || 0,
         wheelRight: parseFloat(localStorage.getItem('admin_wheel_right')) || 0,
@@ -340,12 +351,21 @@ function adminSettings(cfg) {
         publishing: false,
         _client: null,
 
+        _maxControlSpeed() {
+            var v = Number(this.controlMaxSpeed);
+            if (!Number.isFinite(v)) return 50;
+            v = Math.round(v);
+            if (v < 1) v = 1;
+            if (v > 50) v = 50;
+            return v;
+        },
+
         get arrowMaxLinear() {
-            return ARROW_MAX_LINEAR;
+            return this._maxControlSpeed();
         },
 
         get arrowMaxTurnSlow() {
-            return ARROW_MAX_TURN_SLOW;
+            return Math.max(1, Math.round(this._maxControlSpeed() / 2));
         },
 
         init() {
@@ -380,6 +400,11 @@ function adminSettings(cfg) {
             this.$watch('wheelRight', function (val) {
                 localStorage.setItem('admin_wheel_right', val);
             });
+            this.$watch('controlMaxSpeed', function () {
+                var v = self._maxControlSpeed();
+                self.controlMaxSpeed = v;
+                localStorage.setItem('admin_control_max_speed', String(v));
+            });
 
             self._arrowRamp = 0;
             self._arrowLastDrive = null;
@@ -400,8 +425,11 @@ function adminSettings(cfg) {
         },
 
         _publishManualWheels(L, R) {
+            var lim = this._maxControlSpeed();
             var l = Number(L) || 0;
             var r = Number(R) || 0;
+            l = Math.max(-lim, Math.min(lim, l));
+            r = Math.max(-lim, Math.min(lim, r));
             this.wheelLeft = l;
             this.wheelRight = r;
             localStorage.setItem('admin_wheel_left', l);
@@ -431,20 +459,23 @@ function adminSettings(cfg) {
             this._arrowRamp += ARROW_RAMP_STEP;
             var L = 0;
             var R = 0;
+            var maxLinear = this.arrowMaxLinear;
+            var maxTurnSlow = this.arrowMaxTurnSlow;
+            var maxTurnFast = maxTurnSlow * ARROW_TURN_FAST_RATIO;
             if (dir === 'up') {
-                var v = Math.min(this._arrowRamp, ARROW_MAX_LINEAR);
+                var v = Math.min(this._arrowRamp, maxLinear);
                 L = R = v;
             } else if (dir === 'down') {
-                var vb = Math.min(this._arrowRamp, ARROW_MAX_LINEAR);
+                var vb = Math.min(this._arrowRamp, maxLinear);
                 L = R = -vb;
             } else if (dir === 'left') {
-                var s = Math.min(this._arrowRamp, ARROW_MAX_TURN_SLOW);
+                var s = Math.min(this._arrowRamp, maxTurnSlow);
                 L = s;
-                R = Math.min(s * ARROW_TURN_FAST_RATIO, ARROW_MAX_TURN_SLOW * ARROW_TURN_FAST_RATIO);
+                R = Math.min(s * ARROW_TURN_FAST_RATIO, maxTurnFast);
             } else if (dir === 'right') {
-                var sr = Math.min(this._arrowRamp, ARROW_MAX_TURN_SLOW);
+                var sr = Math.min(this._arrowRamp, maxTurnSlow);
                 R = sr;
-                L = Math.min(sr * ARROW_TURN_FAST_RATIO, ARROW_MAX_TURN_SLOW * ARROW_TURN_FAST_RATIO);
+                L = Math.min(sr * ARROW_TURN_FAST_RATIO, maxTurnFast);
             }
             this._publishManualWheels(L, R);
             var label = dir === 'up' ? 'Tiến' : (dir === 'down' ? 'Lùi' : (dir === 'left' ? 'Trái' : 'Phải'));
@@ -511,7 +542,7 @@ function adminSettings(cfg) {
 
             var throttle = -ny;
             var turn = nx;
-            var max = ARROW_MAX_LINEAR;
+            var max = this.arrowMaxLinear;
             var L = Math.max(-max, Math.min(max, (throttle + turn) * max));
             var R = Math.max(-max, Math.min(max, (throttle - turn) * max));
             this._publishManualWheels(Math.round(L), Math.round(R));
