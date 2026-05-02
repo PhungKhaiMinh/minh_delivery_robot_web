@@ -1,5 +1,5 @@
 """
-Dataset waypoint (tên, loại center|right_side, x, y local) cho robot.
+Dataset waypoint robot: mỗi điểm có tên + tọa độ center (x,y) và right_side (x,y) riêng.
 Lưu admin_config / robot_waypoints_dataset — Firestore hoặc DB JSON local.
 """
 
@@ -7,16 +7,32 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.services.db_service import db
 
 ADMIN_CONFIG_COLLECTION = "admin_config"
 WAYPOINT_DATASET_DOC_ID = "robot_waypoints_dataset"
 
-VALID_KINDS = frozenset({"center", "right_side"})
 _ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _MAX_WAYPOINTS = 500
+
+
+def _finite_xy(x: float, y: float) -> bool:
+    return bool(math.isfinite(x) and math.isfinite(y) and abs(x) <= 1e6 and abs(y) <= 1e6)
+
+
+def _normalize_xy_dict(d: Any) -> Optional[Tuple[float, float]]:
+    if not isinstance(d, dict):
+        return None
+    try:
+        x = float(d["x"])
+        y = float(d["y"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not _finite_xy(x, y):
+        return None
+    return (x, y)
 
 
 def _normalize_waypoint(item: Any) -> Optional[Dict[str, Any]]:
@@ -28,19 +44,33 @@ def _normalize_waypoint(item: Any) -> Optional[Dict[str, Any]]:
     name = str(item.get("name", "")).strip()
     if not name or len(name) > 200:
         return None
-    kind = str(item.get("kind", "")).strip()
-    if kind not in VALID_KINDS:
-        return None
+
+    ce = item.get("center")
+    rs = item.get("right_side")
+    c = _normalize_xy_dict(ce)
+    r = _normalize_xy_dict(rs)
+    if c is not None and r is not None:
+        return {
+            "id": lid,
+            "name": name,
+            "center": {"x": c[0], "y": c[1]},
+            "right_side": {"x": r[0], "y": r[1]},
+        }
+
+    # Legacy: kind + flat x, y → nhân đôi vào cả hai (để không mất dữ liệu; admin có thể sửa sau)
     try:
-        x = float(item["x"])
-        y = float(item["y"])
+        ox = float(item["x"])
+        oy = float(item["y"])
     except (KeyError, TypeError, ValueError):
         return None
-    if not (math.isfinite(x) and math.isfinite(y)):
+    if not _finite_xy(ox, oy):
         return None
-    if abs(x) > 1e6 or abs(y) > 1e6:
-        return None
-    return {"id": lid, "name": name, "kind": kind, "x": x, "y": y}
+    return {
+        "id": lid,
+        "name": name,
+        "center": {"x": ox, "y": oy},
+        "right_side": {"x": ox, "y": oy},
+    }
 
 
 def get_waypoints_dataset() -> List[Dict[str, Any]]:

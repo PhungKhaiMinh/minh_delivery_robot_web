@@ -43,6 +43,7 @@ from app.services.pickup_locations_store import (
     set_pickup_xy_overrides,
 )
 from app.services.robot_waypoints_dataset_store import get_waypoints_dataset, set_waypoints_dataset
+from app.services.admin_route_planner import plan_field_route
 
 router = APIRouter(prefix="/api/admin", tags=["Admin API"])
 
@@ -223,6 +224,56 @@ async def admin_put_pickup_xy_overrides(request: Request):
     return JSONResponse(content={"success": True, "locations": list_pickup_locations_admin()})
 
 
+@router.post("/test-route/plan")
+async def admin_test_route_plan(request: Request):
+    """Hoạch định lộ trình test: điểm đầu/cuối = pickup; đồ thị = pickup + waypoint center; Dijkstra."""
+    require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    start_id = body.get("start_pickup_id", "")
+    end_id = body.get("end_pickup_id", "")
+    result = plan_field_route(str(start_id), str(end_id))
+    if result is None:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "message": (
+                    "Không hoạch định được: kiểm tra id đầu/cuối khác nhau, catalog pickup, "
+                    "và dataset waypoint (center + right_side) không rỗng."
+                ),
+            },
+        )
+    return JSONResponse(content={"success": True, **result})
+
+
+@router.post("/test-route/publish")
+async def admin_test_route_publish(request: Request):
+    """Gửi payload lộ trình đã kiểm tra lên MQTT ``UGV/path_topic`` (4 mảng song song nếu có margin)."""
+    require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    pl = body.get("payload")
+    if not isinstance(pl, dict):
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": "Thiếu hoặc sai kiểu trường payload (object)."},
+        )
+    if not mqtt_service.publish_path(pl):
+        return JSONResponse(
+            status_code=502,
+            content={
+                "success": False,
+                "message": "MQTT chưa kết nối hoặc payload không hợp lệ (độ dài stage_x/stage_y/margin).",
+            },
+        )
+    return JSONResponse(content={"success": True, "message": "Đã publish lên path topic."})
+
+
 # ---------------------------------------------------------------------------
 # Campus GPS origin (lat/lon → local x,y reference)
 # ---------------------------------------------------------------------------
@@ -366,8 +417,8 @@ async def admin_put_waypoints_dataset(request: Request):
             content={
                 "success": False,
                 "message": (
-                    "Dữ liệu không hợp lệ: mỗi phần tử cần id (chữ, số, _,-), tên, "
-                    "kind là center hoặc right_side, x và y số hợp lệ; không trùng id."
+                    "Dữ liệu không hợp lệ: mỗi waypoint cần id (chữ, số, _,-), tên, "
+                    "center {x,y} và right_side {x,y} (số hợp lệ); không trùng id."
                 ),
             },
         )

@@ -234,7 +234,9 @@
     <div>
         <h2 class="text-xl font-bold text-slate-900">Địa điểm nhận sách — tọa độ local (x, y)</h2>
         <p class="text-sm text-slate-500 mt-1">
-            Thêm / xóa địa điểm (id, tên, lat, lon) và chỉnh (x, y) mét (Bắc / Đông) — cùng hệ với <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x</code> / <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y</code>.
+            Thêm / xóa địa điểm (id, tên, lat, lon) và chỉnh tọa độ <strong>center</strong> (x, y) cùng <strong>margin</strong> (x_margin, y_margin) mét (Bắc / Đông) — tương ứng
+            <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x</code> / <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y</code> và
+            <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x_margin</code> / <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y_margin</code> khi publish test thực địa.
             Danh sách lưu trên server (Firestore hoặc DB local). Form đặt sách client dùng cùng catalog.
             Lộ trình đơn tự động qua Dijkstra vẫn theo waypoint GPS trên đồ thị — điểm mới có thể không khớp node nếu lat/lon khác graph.
         </p>
@@ -248,8 +250,10 @@
                         <th class="px-3 py-2 text-left font-medium">Tên</th>
                         <th class="px-3 py-2 text-right font-medium">Lat</th>
                         <th class="px-3 py-2 text-right font-medium">Lon</th>
-                        <th class="px-3 py-2 text-right font-medium">X (m)</th>
-                        <th class="px-3 py-2 text-right font-medium">Y (m)</th>
+                        <th class="px-3 py-2 text-right font-medium">X center (m)</th>
+                        <th class="px-3 py-2 text-right font-medium">Y center (m)</th>
+                        <th class="px-3 py-2 text-right font-medium">X margin (m)</th>
+                        <th class="px-3 py-2 text-right font-medium">Y margin (m)</th>
                         <th class="px-3 py-2 text-left font-medium w-32"></th>
                     </tr>
                 </thead>
@@ -285,6 +289,14 @@
                                 <input type="text" inputmode="decimal" x-model="r.yStr" spellcheck="false"
                                     class="w-full min-w-[5.5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
                             </td>
+                            <td class="px-3 py-2">
+                                <input type="text" inputmode="decimal" x-model="r.mxStr" spellcheck="false"
+                                    class="w-full min-w-[5.5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
+                            </td>
+                            <td class="px-3 py-2">
+                                <input type="text" inputmode="decimal" x-model="r.myStr" spellcheck="false"
+                                    class="w-full min-w-[5.5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
+                            </td>
                             <td class="px-3 py-2 align-top whitespace-nowrap space-y-1">
                                 <button type="button" @click="resetRow(i)"
                                     class="block text-xs font-semibold text-sky-700 hover:underline">Từ GPS</button>
@@ -313,6 +325,67 @@
     </div>
 </div>
 
+<div class="max-w-7xl mx-auto mt-8 space-y-3" x-data="fieldTestRoutePlanner()">
+    <div>
+        <h2 class="text-xl font-bold text-slate-900">Kịch bản test thực địa</h2>
+        <p class="text-sm text-slate-500 mt-1">
+            Chọn điểm đầu và điểm cuối từ <strong>Địa điểm nhận sách</strong> (tọa center dùng cho đồ thị). Nút <strong>Hoạch định đường đi</strong> gọi Dijkstra trên đồ thị đầy đủ:
+            điểm đầu, mọi waypoint trong dataset (theo <code class="text-slate-700 bg-slate-100 px-1 rounded">center</code>), điểm cuối — cạnh là khoảng cách Euclid (m).
+            Sau khi xem lại thứ tự, nhấn <strong>Bắt đầu</strong> để gửi lên MQTT topic path với bốn mảng song song:
+            <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x</code>/<code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y</code> = center;
+            <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x_margin</code>/<code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y_margin</code> = margin pickup hoặc <code class="text-slate-700 bg-slate-100 px-1 rounded">right_side</code> của waypoint.
+        </p>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div class="flex flex-wrap gap-4 items-end">
+            <div class="min-w-[12rem] flex-1">
+                <label class="block text-xs font-medium text-slate-600 mb-1">Điểm đầu</label>
+                <select x-model="startId" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+                    <option value="">— Chọn —</option>
+                    <template x-for="p in pickupOptions" :key="p.id">
+                        <option :value="p.id" x-text="p.name + ' (' + p.id + ')'"></option>
+                    </template>
+                </select>
+            </div>
+            <div class="min-w-[12rem] flex-1">
+                <label class="block text-xs font-medium text-slate-600 mb-1">Điểm cuối</label>
+                <select x-model="endId" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+                    <option value="">— Chọn —</option>
+                    <template x-for="p in pickupOptions" :key="'e_' + p.id">
+                        <option :value="p.id" x-text="p.name + ' (' + p.id + ')'"></option>
+                    </template>
+                </select>
+            </div>
+            <button type="button" @click="plan()" :disabled="planning || !startId || !endId"
+                class="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50">
+                <span x-show="!planning">Hoạch định đường đi</span>
+                <span x-show="planning">Đang tính…</span>
+            </button>
+            <button type="button" @click="publishPath()" :disabled="publishing || !lastPayload"
+                class="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50">
+                <span x-show="!publishing">Bắt đầu</span>
+                <span x-show="publishing">Đang gửi…</span>
+            </button>
+        </div>
+        <p class="text-xs text-slate-600" x-show="totalLengthM != null">
+            Tổng chiều dài (ước lượng theo cạnh Euclid): <span class="font-mono font-semibold" x-text="Number(totalLengthM).toFixed(3) + ' m'"></span>
+        </p>
+        <p class="text-xs text-red-600 min-h-[1rem]" x-show="planErr" x-text="planErr"></p>
+        <p class="text-xs text-emerald-700 font-medium min-h-[1rem]" x-show="publishMsg" x-text="publishMsg"></p>
+        <div x-show="orderedStops.length" class="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+            <p class="text-xs font-semibold text-slate-700 mb-2">Thứ tự lộ trình (kiểm tra thuật toán)</p>
+            <ol class="list-decimal list-inside space-y-1 text-sm text-slate-800">
+                <template x-for="(s, idx) in orderedStops" :key="idx + '_' + (s.id || '') + '_' + (s.kind || '')">
+                    <li>
+                        <span class="font-medium" x-text="s.kind === 'waypoint' ? 'Waypoint' : 'Pickup'"></span>:
+                        <span x-text="s.name"></span>
+                        <span class="text-slate-500 font-mono text-xs"> — center (<span x-text="Number(s.x).toFixed(3)"></span>, <span x-text="Number(s.y).toFixed(3)"></span>) margin (<span x-text="Number(s.x_margin).toFixed(3)"></span>, <span x-text="Number(s.y_margin).toFixed(3)"></span>)</span>
+                    </li>
+                </template>
+            </ol>
+        </div>
+    </div>
+</div>
 
 {% set wpds_cfg = {
     "wsUrl": mqtt_ws_url,
@@ -326,10 +399,10 @@
     <div>
         <h2 class="text-xl font-bold text-slate-900">Dataset waypoint robot</h2>
         <p class="text-sm text-slate-500 mt-1">
-            Tạo danh sách điểm tham chiếu nhanh (tên, loại <code class="text-slate-700 bg-slate-100 px-1 rounded">center</code> hoặc
-            <code class="text-slate-700 bg-slate-100 px-1 rounded">right_side</code>, tọa độ x, y mét Bắc/Đông).
-            Nút <strong class="text-teal-700">GPS</strong> gán x, y từ vị trí hiện tại trên <code class="text-slate-700 bg-slate-100 px-1 rounded">UGV/localization/pose</code> (cần MQTT kết nối).
-            Dataset lưu trên Firestore hoặc DB local (cùng <code class="text-slate-700 bg-slate-100 px-1 rounded">admin_config</code>).
+            Mỗi waypoint có <strong>một tên</strong>. Hai thuộc tính <code class="text-slate-700 bg-slate-100 px-1 rounded">center</code> và
+            <code class="text-slate-700 bg-slate-100 px-1 rounded">right_side</code> mỗi thuộc tính có cặp <strong>x, y</strong> riêng (mét, Bắc/Đông).
+            Dùng <strong class="text-teal-700">GPS → center</strong> / <strong class="text-teal-700">GPS → right_side</strong> để gán tọa độ hiện tại từ
+            <code class="text-slate-700 bg-slate-100 px-1 rounded">UGV/localization/pose</code> (cần MQTT). Dataset lưu Firestore hoặc DB local.
         </p>
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
@@ -351,59 +424,56 @@
             </div>
             <p class="text-[11px] text-red-600 min-h-[1rem]" x-show="poseErr" x-text="poseErr"></p>
         </div>
-        <div class="overflow-x-auto">
-            <table class="min-w-full text-sm">
-                <thead class="text-xs text-slate-500 bg-slate-50 border-b border-slate-200">
-                    <tr>
-                        <th class="px-3 py-2 text-left font-medium">ID</th>
-                        <th class="px-3 py-2 text-left font-medium">Tên</th>
-                        <th class="px-3 py-2 text-left font-medium">Loại</th>
-                        <th class="px-3 py-2 text-right font-medium">X (m)</th>
-                        <th class="px-3 py-2 text-right font-medium">Y (m)</th>
-                        <th class="px-3 py-2 text-left font-medium w-36"></th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    <template x-for="(r, i) in items" :key="r._k">
-                        <tr>
-                            <td class="px-3 py-2 align-top">
-                                <template x-if="r._isNew">
-                                    <input type="text" x-model="r.idStr" spellcheck="false" placeholder="vd: wp_a1"
-                                        class="w-full min-w-[6rem] max-w-[10rem] px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-teal-500" />
-                                </template>
-                                <template x-if="!r._isNew">
-                                    <span class="font-mono text-xs text-slate-700" x-text="r.id"></span>
-                                </template>
-                            </td>
-                            <td class="px-3 py-2">
-                                <input type="text" x-model="r.nameStr" spellcheck="false" placeholder="Tên waypoint"
-                                    class="w-full min-w-[7rem] max-w-[14rem] px-2 py-1.5 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-teal-500" />
-                            </td>
-                            <td class="px-3 py-2">
-                                <select x-model="r.kind"
-                                    class="w-full min-w-[8rem] max-w-[11rem] px-2 py-1.5 rounded-lg border border-slate-200 text-xs bg-white focus:ring-2 focus:ring-teal-500">
-                                    <option value="center">center</option>
-                                    <option value="right_side">right_side</option>
-                                </select>
-                            </td>
-                            <td class="px-3 py-2">
-                                <input type="text" inputmode="decimal" x-model="r.xStr" spellcheck="false" placeholder="X"
-                                    class="w-full min-w-[5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-teal-500" />
-                            </td>
-                            <td class="px-3 py-2">
-                                <input type="text" inputmode="decimal" x-model="r.yStr" spellcheck="false" placeholder="Y"
-                                    class="w-full min-w-[5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-teal-500" />
-                            </td>
-                            <td class="px-3 py-2 align-top whitespace-nowrap space-y-1">
-                                <button type="button" @click="applyGpsToRow(i)"
-                                    class="block w-full text-left text-xs font-semibold text-teal-700 hover:underline">GPS</button>
-                                <button type="button" @click="removeRow(i)"
-                                    class="block w-full text-left text-xs font-semibold text-red-600 hover:underline">Xóa</button>
-                            </td>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
+        <div class="space-y-4">
+            <template x-for="(r, i) in items" :key="r._k">
+                <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">
+                    <div class="flex flex-wrap items-end gap-3">
+                        <div class="min-w-[7rem]">
+                            <label class="block text-xs font-medium text-slate-600 mb-1">ID</label>
+                            <template x-if="r._isNew">
+                                <input type="text" x-model="r.idStr" spellcheck="false" placeholder="vd: wp_a1"
+                                    class="w-full max-w-[11rem] px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-teal-500" />
+                            </template>
+                            <template x-if="!r._isNew">
+                                <span class="font-mono text-sm text-slate-800" x-text="r.id"></span>
+                            </template>
+                        </div>
+                        <div class="flex-1 min-w-[12rem] max-w-md">
+                            <label class="block text-xs font-medium text-slate-600 mb-1">Tên waypoint</label>
+                            <input type="text" x-model="r.nameStr" spellcheck="false" placeholder="Tên hiển thị"
+                                class="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-teal-500" />
+                        </div>
+                        <button type="button" @click="removeRow(i)"
+                            class="px-3 py-1.5 text-xs font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 shrink-0">
+                            Xóa waypoint
+                        </button>
+                    </div>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div class="rounded-lg border border-emerald-200 bg-white p-3 space-y-2">
+                            <p class="text-xs font-bold text-emerald-800 uppercase tracking-wide">center</p>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="text" inputmode="decimal" x-model="r.cxStr" placeholder="X" spellcheck="false"
+                                    class="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-emerald-500" />
+                                <input type="text" inputmode="decimal" x-model="r.cyStr" placeholder="Y" spellcheck="false"
+                                    class="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-emerald-500" />
+                            </div>
+                            <button type="button" @click="applyGps(i, 'center')"
+                                class="text-xs font-semibold text-emerald-700 hover:underline">GPS → center</button>
+                        </div>
+                        <div class="rounded-lg border border-indigo-200 bg-white p-3 space-y-2">
+                            <p class="text-xs font-bold text-indigo-800 uppercase tracking-wide">right_side</p>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="text" inputmode="decimal" x-model="r.rsxStr" placeholder="X" spellcheck="false"
+                                    class="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-indigo-500" />
+                                <input type="text" inputmode="decimal" x-model="r.rsyStr" placeholder="Y" spellcheck="false"
+                                    class="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-indigo-500" />
+                            </div>
+                            <button type="button" @click="applyGps(i, 'right_side')"
+                                class="text-xs font-semibold text-indigo-700 hover:underline">GPS → right_side</button>
+                        </div>
+                    </div>
+                </div>
+            </template>
         </div>
         <div class="flex flex-wrap items-center gap-3">
             <button type="button" @click="addRow()"
@@ -704,6 +774,10 @@ window._doDeleteOrder = async function (id) {
     }
 
     function mapLocToRow(loc) {
+        var defx = loc.default_x != null ? Number(loc.default_x) : 0;
+        var defy = loc.default_y != null ? Number(loc.default_y) : 0;
+        var defmx = loc.default_x_margin != null ? Number(loc.default_x_margin) : defx;
+        var defmy = loc.default_y_margin != null ? Number(loc.default_y_margin) : defy;
         return {
             _rowKey: nextRowKey(),
             id: loc.id,
@@ -711,11 +785,15 @@ window._doDeleteOrder = async function (id) {
             nameStr: loc.name != null ? String(loc.name) : '',
             latStr: loc.lat != null ? String(loc.lat) : '',
             lngStr: loc.lng != null ? String(loc.lng) : '',
-            default_x: loc.default_x != null ? Number(loc.default_x) : 0,
-            default_y: loc.default_y != null ? Number(loc.default_y) : 0,
+            default_x: defx,
+            default_y: defy,
+            default_x_margin: defmx,
+            default_y_margin: defmy,
             overridden: !!loc.overridden,
             xStr: loc.x != null ? String(Number(loc.x).toFixed(4)) : '',
             yStr: loc.y != null ? String(Number(loc.y).toFixed(4)) : '',
+            mxStr: loc.x_margin != null ? String(Number(loc.x_margin).toFixed(4)) : '',
+            myStr: loc.y_margin != null ? String(Number(loc.y_margin).toFixed(4)) : '',
             _isNew: false,
         };
     }
@@ -751,9 +829,13 @@ window._doDeleteOrder = async function (id) {
                     lngStr: '',
                     default_x: 0,
                     default_y: 0,
+                    default_x_margin: 0,
+                    default_y_margin: 0,
                     overridden: false,
                     xStr: '0',
                     yStr: '0',
+                    mxStr: '0',
+                    myStr: '0',
                     _isNew: true,
                 });
             },
@@ -768,6 +850,10 @@ window._doDeleteOrder = async function (id) {
                 if (!r) return;
                 r.xStr = Number(r.default_x).toFixed(4);
                 r.yStr = Number(r.default_y).toFixed(4);
+                var dmx = r.default_x_margin != null ? Number(r.default_x_margin) : r.default_x;
+                var dmy = r.default_y_margin != null ? Number(r.default_y_margin) : r.default_y;
+                r.mxStr = Number(dmx).toFixed(4);
+                r.myStr = Number(dmy).toFixed(4);
             },
 
             syncBootFromRows(list) {
@@ -818,12 +904,21 @@ window._doDeleteOrder = async function (id) {
                     var id0 = row._isNew ? String(row.idStr || '').trim() : String(row.id || '').trim();
                     var x = parseFloat(String(row.xStr != null ? row.xStr : '').replace(',', '.'));
                     var y = parseFloat(String(row.yStr != null ? row.yStr : '').replace(',', '.'));
+                    var mx = parseFloat(String(row.mxStr != null ? row.mxStr : '').replace(',', '.'));
+                    var my = parseFloat(String(row.myStr != null ? row.myStr : '').replace(',', '.'));
                     if (Number.isNaN(x) || Number.isNaN(y)) {
-                        this.saveErr = 'X / Y phải là số (dòng ' + (i + 1) + ').';
+                        this.saveErr = 'X / Y center phải là số (dòng ' + (i + 1) + ').';
                         return;
                     }
-                    if (Math.abs(x - row.default_x) > tol || Math.abs(y - row.default_y) > tol) {
-                        overrides[id0] = { x: x, y: y };
+                    if (Number.isNaN(mx) || Number.isNaN(my)) {
+                        this.saveErr = 'X / Y margin phải là số (dòng ' + (i + 1) + ').';
+                        return;
+                    }
+                    var defmx = row.default_x_margin != null ? Number(row.default_x_margin) : row.default_x;
+                    var defmy = row.default_y_margin != null ? Number(row.default_y_margin) : row.default_y;
+                    if (Math.abs(x - row.default_x) > tol || Math.abs(y - row.default_y) > tol
+                        || Math.abs(mx - defmx) > tol || Math.abs(my - defmy) > tol) {
+                        overrides[id0] = { x: x, y: y, x_margin: mx, y_margin: my };
                     }
                 }
                 this.saving = true;
@@ -856,6 +951,103 @@ window._doDeleteOrder = async function (id) {
     }
 
     window.pickupLocationsEditor = pickupLocationsEditor;
+
+    function fieldTestRoutePlanner() {
+        return {
+            pickupOptions: [],
+            startId: '',
+            endId: '',
+            planning: false,
+            publishing: false,
+            planErr: '',
+            publishMsg: '',
+            orderedStops: [],
+            totalLengthM: null,
+            lastPayload: null,
+
+            reloadPickups() {
+                var list = readPickupLocationsBoot();
+                this.pickupOptions = (Array.isArray(list) ? list : []).map(function (loc) {
+                    return { id: String(loc.id), name: String(loc.name || loc.id) };
+                });
+            },
+
+            init() {
+                var self = this;
+                this.reloadPickups();
+                window.addEventListener('admin-pickup-locations-updated', function () {
+                    self.reloadPickups();
+                });
+            },
+
+            async plan() {
+                this.planErr = '';
+                this.publishMsg = '';
+                this.lastPayload = null;
+                this.orderedStops = [];
+                this.totalLengthM = null;
+                if (!this.startId || !this.endId || this.startId === this.endId) {
+                    this.planErr = 'Chọn hai điểm đầu / cuối khác nhau.';
+                    return;
+                }
+                this.planning = true;
+                try {
+                    var res = await fetch('/api/admin/test-route/plan', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            start_pickup_id: this.startId,
+                            end_pickup_id: this.endId,
+                        }),
+                    });
+                    var data = await res.json().catch(function () { return null; });
+                    if (!res.ok || !data || !data.success) {
+                        this.planErr = (data && data.message) || 'Hoạch định thất bại';
+                        return;
+                    }
+                    this.orderedStops = data.ordered_stops || [];
+                    this.totalLengthM = data.total_length_m != null ? data.total_length_m : null;
+                    this.lastPayload = data.payload || null;
+                } catch (e) {
+                    this.planErr = 'Lỗi mạng: ' + e.message;
+                } finally {
+                    this.planning = false;
+                }
+            },
+
+            async publishPath() {
+                this.publishMsg = '';
+                this.planErr = '';
+                if (!this.lastPayload) {
+                    this.planErr = 'Chưa có lộ trình — hãy Hoạch định đường đi trước.';
+                    return;
+                }
+                this.publishing = true;
+                try {
+                    var res = await fetch('/api/admin/test-route/publish', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ payload: this.lastPayload }),
+                    });
+                    var data = await res.json().catch(function () { return null; });
+                    if (!res.ok || !data || !data.success) {
+                        this.planErr = (data && data.message) || 'Publish thất bại';
+                        return;
+                    }
+                    this.publishMsg = data.message || 'Đã gửi MQTT.';
+                    var self = this;
+                    setTimeout(function () { self.publishMsg = ''; }, 4000);
+                } catch (e) {
+                    this.planErr = 'Lỗi mạng: ' + e.message;
+                } finally {
+                    this.publishing = false;
+                }
+            },
+        };
+    }
+    window.fieldTestRoutePlanner = fieldTestRoutePlanner;
 })();
 </script>
 <script>
@@ -886,17 +1078,36 @@ window._doDeleteOrder = async function (id) {
         return [];
     }
 
+    function fmt4(v) {
+        if (v == null || v === '') return '';
+        var n = Number(v);
+        return Number.isFinite(n) ? n.toFixed(4) : '';
+    }
+
     function mapServerRow(w) {
-        return {
+        var c = w.center && typeof w.center === 'object' ? w.center : null;
+        var rs = w.right_side && typeof w.right_side === 'object' ? w.right_side : null;
+        var base = {
             _k: nextKey(),
             id: w.id,
             idStr: String(w.id),
             nameStr: w.name != null ? String(w.name) : '',
-            kind: (w.kind === 'right_side' ? 'right_side' : 'center'),
-            xStr: w.x != null ? String(Number(w.x).toFixed(4)) : '',
-            yStr: w.y != null ? String(Number(w.y).toFixed(4)) : '',
             _isNew: false,
         };
+        if (c && rs) {
+            base.cxStr = fmt4(c.x);
+            base.cyStr = fmt4(c.y);
+            base.rsxStr = fmt4(rs.x);
+            base.rsyStr = fmt4(rs.y);
+            return base;
+        }
+        var ox = w.x;
+        var oy = w.y;
+        base.cxStr = fmt4(ox);
+        base.cyStr = fmt4(oy);
+        base.rsxStr = fmt4(ox);
+        base.rsyStr = fmt4(oy);
+        return base;
     }
 
     function newDraftRow() {
@@ -906,9 +1117,10 @@ window._doDeleteOrder = async function (id) {
             id: nid,
             idStr: nid,
             nameStr: '',
-            kind: 'center',
-            xStr: '',
-            yStr: '',
+            cxStr: '',
+            cyStr: '',
+            rsxStr: '',
+            rsyStr: '',
             _isNew: true,
         };
     }
@@ -991,7 +1203,7 @@ window._doDeleteOrder = async function (id) {
                 this.items.splice(i, 1);
             },
 
-            applyGpsToRow(i) {
+            applyGps(i, slot) {
                 this.poseErr = '';
                 if (this.poseLiveX == null || this.poseLiveY == null) {
                     window.alert('Chưa nhận được x, y từ pose (kết nối MQTT và chờ UGV/localization/pose).');
@@ -999,8 +1211,15 @@ window._doDeleteOrder = async function (id) {
                 }
                 var r = this.items[i];
                 if (!r) return;
-                r.xStr = this.poseLiveX.toFixed(4);
-                r.yStr = this.poseLiveY.toFixed(4);
+                var xs = this.poseLiveX.toFixed(4);
+                var ys = this.poseLiveY.toFixed(4);
+                if (slot === 'right_side') {
+                    r.rsxStr = xs;
+                    r.rsyStr = ys;
+                } else {
+                    r.cxStr = xs;
+                    r.cyStr = ys;
+                }
             },
 
             syncBoot(list) {
@@ -1020,7 +1239,6 @@ window._doDeleteOrder = async function (id) {
                     var r = this.items[i];
                     var id = r._isNew ? String(r.idStr || '').trim() : String(r.id || '').trim();
                     var name = String(r.nameStr != null ? r.nameStr : '').trim();
-                    var kind = r.kind === 'right_side' ? 'right_side' : 'center';
                     if (!idRe.test(id)) {
                         this.saveErr = 'ID không hợp lệ (dòng ' + (i + 1) + ').';
                         return;
@@ -1029,13 +1247,20 @@ window._doDeleteOrder = async function (id) {
                         this.saveErr = 'Tên không được trống (dòng ' + (i + 1) + ').';
                         return;
                     }
-                    var x = parseFloat(String(r.xStr || '').replace(',', '.'));
-                    var y = parseFloat(String(r.yStr || '').replace(',', '.'));
-                    if (Number.isNaN(x) || Number.isNaN(y)) {
-                        this.saveErr = 'X và Y phải là số (dòng ' + (i + 1) + ').';
+                    var cx = parseFloat(String(r.cxStr || '').replace(',', '.'));
+                    var cy = parseFloat(String(r.cyStr || '').replace(',', '.'));
+                    var rx = parseFloat(String(r.rsxStr || '').replace(',', '.'));
+                    var ry = parseFloat(String(r.rsyStr || '').replace(',', '.'));
+                    if (Number.isNaN(cx) || Number.isNaN(cy) || Number.isNaN(rx) || Number.isNaN(ry)) {
+                        this.saveErr = 'Center và right_side đều cần x, y hợp lệ (dòng ' + (i + 1) + ').';
                         return;
                     }
-                    out.push({ id: id, name: name, kind: kind, x: x, y: y });
+                    out.push({
+                        id: id,
+                        name: name,
+                        center: { x: cx, y: cy },
+                        right_side: { x: rx, y: ry },
+                    });
                 }
                 var seen = {};
                 for (i = 0; i < out.length; i++) {

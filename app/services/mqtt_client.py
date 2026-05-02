@@ -146,10 +146,25 @@ class _MqttService:
     # ------------------------------------------------------------------
 
     def publish_path(self, payload: dict) -> bool:
-        """Publish ``{"stage_x":[…], "stage_y":[…]}`` to ``MQTT_TOPIC_PATH``."""
+        """Publish path JSON to ``MQTT_TOPIC_PATH`` (``stage_x`` / ``stage_y``; optional margin arrays same length)."""
         if self._client is None or not self._connected:
             print(f"{_TAG} cannot publish — not connected")
             return False
+        sx = payload.get("stage_x")
+        sy = payload.get("stage_y")
+        if not isinstance(sx, list) or not isinstance(sy, list) or len(sx) != len(sy):
+            print(f"{_TAG} publish_path: invalid stage_x/stage_y")
+            return False
+        smx = payload.get("stage_x_margin")
+        smy = payload.get("stage_y_margin")
+        if smx is not None or smy is not None:
+            if not isinstance(smx, list) or not isinstance(smy, list):
+                print(f"{_TAG} publish_path: invalid margin arrays")
+                return False
+            n = len(sx)
+            if len(smx) != n or len(smy) != n:
+                print(f"{_TAG} publish_path: margin array length mismatch")
+                return False
         raw = json.dumps(payload)
         info = self._client.publish(MQTT_TOPIC_PATH, raw, qos=1)
         print(f"{_TAG} published path → {MQTT_TOPIC_PATH} ({len(raw)} bytes)")
