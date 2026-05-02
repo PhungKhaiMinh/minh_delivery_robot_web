@@ -184,6 +184,9 @@ CAMPUS_ORIGIN_LAT = float(os.getenv("CAMPUS_ORIGIN_LAT", "10.77202433"))
 CAMPUS_ORIGIN_LON = float(os.getenv("CAMPUS_ORIGIN_LON", "106.65860867"))
 CAMPUS_ORIGIN_ALT = float(os.getenv("CAMPUS_ORIGIN_ALT", "0.0"))
 
+# === RTAB-Map database (graph pose) — Admin Tracking ===
+RTAB_MAP_DB_PATH = os.getenv("RTAB_MAP_DB_PATH", str(BASE_DIR / "A5_night.db"))
+
 # === MQTT topic gửi waypoints cho robot di chuyển ===
 MQTT_TOPIC_PATH = os.getenv("MQTT_TOPIC_PATH", "UGV/path_topic")
 # Gốc GPS (lat/lon/alt) — đồng bộ với firmware / scheduler khi admin đổi điểm base

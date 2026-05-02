@@ -41,3 +41,6 @@ env/
 
 # Data files (generated at runtime)
 data/collections/
+
+# RTAB-Map DB — thường >100MB, GitHub từ chối; deploy bằng RTAB_MAP_DB_PATH hoặc volume
+A5_night.db

@@ -28,6 +28,7 @@ from app.config import (
     CAMPUS_ORIGIN_LAT,
     CAMPUS_ORIGIN_LON,
     CAMPUS_ORIGIN_ALT,
+    RTAB_MAP_DB_PATH,
 )
 from app.services.admin_settings_store import get_can_last_params, get_los_last_params
 from app.services.auth_service import get_current_user
@@ -133,6 +134,7 @@ async def admin_tracking(request: Request):
         "campus_origin_lat": CAMPUS_ORIGIN_LAT,
         "campus_origin_lon": CAMPUS_ORIGIN_LON,
         "mqtt_topic_pose": MQTT_UGV_TOPIC_POSE,
+        "rtab_map_db_path": RTAB_MAP_DB_PATH,
         **_mqtt_ctx(),
     }
     return templates.TemplateResponse(request, "admin/tracking.html", ctx)

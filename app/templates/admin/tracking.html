@@ -4,12 +4,7 @@
 {% block admin_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 <style>
-#admin-map { min-height: 500px; border-radius: 1rem; z-index: 1; }
-.campus-label {
-    background: none; border: none; box-shadow: none;
-    font-size: 11px; font-weight: 700; color: #1e293b;
-    white-space: nowrap; text-shadow: 0 0 4px #fff, 0 0 4px #fff;
-}
+#admin-map { min-height: 560px; border-radius: 1rem; z-index: 1; background: #f1f5f9; }
 </style>
 {% endblock %}
 
@@ -18,15 +13,19 @@
     "wsUrl": mqtt_ws_url,
     "clientPrefix": mqtt_client_prefix,
     "topicPose": mqtt_topic_pose,
-    "originLat": campus_origin_lat,
-    "originLon": campus_origin_lon,
     "mqttUser": mqtt_username,
     "mqttPass": mqtt_password,
+    "graphUrl": "/api/admin/rtab-map/graph",
+    "rtabDbLabel": rtab_map_db_path,
 } %}
 <div class="max-w-7xl mx-auto space-y-6" x-data='adminTracking({{ tracking_cfg|tojson }})'>
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Tracking</h1>
-        <p class="text-sm text-slate-500 mt-1">Tọa độ &amp; hướng từ <code class="text-xs bg-slate-200 px-1 rounded" x-text="topicPoseLabel"></code> (x, y, yaw) — bản đồ dùng x,y chuyển tương đương sang lat/lon.</p>
+        <p class="text-sm text-slate-500 mt-1">
+            Bản đồ lấy từ graph RTAB-Map trong file <code class="text-xs bg-slate-200 px-1 rounded" x-text="dbLabel"></code>
+            (Node pose + liên kết láng giềng). Hệ trục hiển thị trùng với tọa độ local <strong>x, y</strong> (mét) từ
+            <code class="text-xs bg-slate-200 px-1 rounded" x-text="topicPoseLabel"></code> — kéo / thu phó để tương tác.
+        </p>
     </div>
 
     <div class="flex flex-wrap items-center gap-3">
@@ -44,291 +43,31 @@
         <span class="text-xs text-slate-500" x-show="trailCount > 0">
             Quỹ đạo: <span x-text="trailCount"></span> điểm
         </span>
-        <button x-show="trailCount > 0" @click="clearTrail()"
+        <button x-show="trailCount > 0" type="button" @click="clearTrail()"
             class="px-2.5 py-1 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
             Xóa quỹ đạo
         </button>
         <span class="text-xs text-red-600" x-show="errDetail" x-text="errDetail"></span>
     </div>
 
+    <p class="text-sm text-red-600 font-medium" x-show="graphErr" x-text="graphErr"></p>
+    <p class="text-xs text-slate-500" x-show="graphMeta && !graphErr" x-text="graphMeta"></p>
+
     <div class="relative bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div id="admin-map" class="w-full"></div>
-        <div x-show="conn !== 'connected'" class="absolute inset-0 bg-white/70 flex items-center justify-center text-slate-600 text-sm font-medium pointer-events-none">
-            Chờ kết nối MQTT để cập nhật vị trí…
+        <div x-show="conn !== 'connected' && mapReady"
+            class="absolute bottom-3 left-3 right-3 pointer-events-none flex justify-center">
+            <span class="px-3 py-1.5 rounded-lg bg-white/90 border border-slate-200 text-xs text-slate-600 shadow-sm">
+                Chờ MQTT để cập nhật vị trí robot…
+            </span>
         </div>
     </div>
-    <!-- Route legend -->
-    <div x-show="routeList.length > 0" class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-        <h3 class="text-sm font-semibold text-slate-700 mb-2">Đường đi Dijkstra trên bản đồ</h3>
-        <ul class="space-y-1">
-            <template x-for="r in routeList" :key="r.id">
-                <li class="flex items-center gap-2 text-xs text-slate-600">
-                    <span class="w-4 h-1 rounded" :style="'background:' + r.color"></span>
-                    <span x-text="r.pickup"></span>
-                    <span class="ml-auto text-slate-400" x-text="r.status"></span>
-                </li>
-            </template>
-        </ul>
-    </div>
-    <p class="text-xs text-slate-400">Payload: <code>{"x":0.0,"y":0.0,"yaw":0.0}</code> (4 chữ số thập phân trên bus)</p>
+    <p class="text-xs text-slate-400">Pose: <code>{"x":0.0,"y":0.0,"yaw":0.0}</code> — cùng khung với mặt phẳng map RTAB (tx, ty từ pose 3×4).</p>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
 (function () {
-    function fmtCoord(v) {
-        if (typeof window.formatCoordDisplay === 'function') return window.formatCoordDisplay(v);
-        if (v == null || v === '') return '';
-        var n = Number(v);
-        return Number.isFinite(n) ? String(n) : String(v);
-    }
-
-    var CAMPUS_WAYPOINTS = [
-        { lat: 10.77202433, lon: 106.65860867, name: 'B1' },
-        { lat: 10.77213017, lon: 106.65878283, name: 'Fablab' },
-        { lat: 10.77225250, lon: 106.65900900, name: '' },
-        { lat: 10.77217150, lon: 106.65906250, name: '' },
-        { lat: 10.77276967, lon: 106.66008117, name: '' },
-        { lat: 10.77295400, lon: 106.65999417, name: 'Thư viện' },
-        { lat: 10.77252733, lon: 106.65899400, name: '' },
-        { lat: 10.77264000, lon: 106.65881183, name: '' },
-        { lat: 10.77288400, lon: 106.65864933, name: '' },
-        { lat: 10.77288400, lon: 106.65852917, name: 'Circle K' },
-    ];
-
-    var CAMPUS_EDGES = [
-        [0, 1], [1, 2], [2, 3], [2, 6], [3, 4], [4, 5],
-        [6, 7], [7, 8], [8, 9], [6, 3],
-    ];
-
-    function buildAdj() {
-        var adj = {};
-        for (var e = 0; e < CAMPUS_EDGES.length; e++) {
-            var i = CAMPUS_EDGES[e][0], j = CAMPUS_EDGES[e][1];
-            var d = haversine(CAMPUS_WAYPOINTS[i], CAMPUS_WAYPOINTS[j]);
-            if (!adj[i]) adj[i] = [];
-            if (!adj[j]) adj[j] = [];
-            adj[i].push({ to: j, w: d });
-            adj[j].push({ to: i, w: d });
-        }
-        return adj;
-    }
-
-    function haversine(a, b) {
-        var R = 6371000;
-        var toRad = Math.PI / 180;
-        var dLat = (b.lat - a.lat) * toRad;
-        var dLon = (b.lon - a.lon) * toRad;
-        var sa = Math.sin(dLat / 2), sb = Math.sin(dLon / 2);
-        var h = sa * sa + Math.cos(a.lat * toRad) * Math.cos(b.lat * toRad) * sb * sb;
-        return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-    }
-
-    function dijkstraPath(src, dst) {
-        var adj = buildAdj();
-        var dist = {}, prev = {}, visited = {};
-        dist[src] = 0;
-        while (true) {
-            var u = -1, best = Infinity;
-            for (var k in dist) {
-                if (!visited[k] && dist[k] < best) { best = dist[k]; u = Number(k); }
-            }
-            if (u === -1 || u === dst) break;
-            visited[u] = true;
-            var neighbors = adj[u] || [];
-            for (var n = 0; n < neighbors.length; n++) {
-                var v = neighbors[n].to, nd = best + neighbors[n].w;
-                if (dist[v] === undefined || nd < dist[v]) {
-                    dist[v] = nd;
-                    prev[v] = u;
-                }
-            }
-        }
-        if (dist[dst] === undefined) return null;
-        var path = [];
-        for (var cur = dst; cur !== src; cur = prev[cur]) path.unshift(cur);
-        path.unshift(src);
-        return path;
-    }
-
-    var CENTER = [10.77250, 106.65930];
-
-    function addWaypoints(map) {
-        var pathCoords = [];
-        for (var i = 0; i < CAMPUS_WAYPOINTS.length; i++) {
-            var wp = CAMPUS_WAYPOINTS[i];
-            var pos = [wp.lat, wp.lon];
-            pathCoords.push(pos);
-
-            var color = wp.name ? '#0ea5e9' : '#94a3b8';
-            var radius = wp.name ? 6 : 4;
-
-            L.circleMarker(pos, {
-                radius: radius,
-                fillColor: color,
-                color: '#fff',
-                weight: 2,
-                fillOpacity: 0.9,
-            }            ).addTo(map).bindPopup(
-                '<b>' + (wp.name || 'Waypoint ' + i) + '</b><br>' +
-                'Lat: ' + fmtCoord(wp.lat) + '<br>' +
-                'Lon: ' + fmtCoord(wp.lon)
-            );
-
-            if (wp.name) {
-                L.marker(pos, {
-                    icon: L.divIcon({
-                        className: 'campus-label',
-                        html: wp.name,
-                        iconAnchor: [-8, 12],
-                    }),
-                    interactive: false,
-                }).addTo(map);
-            }
-        }
-
-        L.polyline(pathCoords, {
-            color: '#0ea5e9',
-            weight: 2,
-            opacity: 0.4,
-            dashArray: '6 4',
-        }).addTo(map);
-    }
-
-    var ROUTE_COLORS = [
-        '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6',
-        '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#6366f1',
-    ];
-
-    var FOOTBALL_FIELD = {
-        label: 'Sân bóng đá (B1 → 4 góc)',
-        color: '#e11d48',
-        corners: [
-            { lat: 10.77202433, lon: 106.65860867, name: 'B1 (xuất phát)' },
-            { lat: 10.77225250, lon: 106.65900900, name: 'WP trung gian' },
-            { lat: 10.7721896,  lon: 106.6590731,  name: 'Góc 3' },
-            { lat: 10.7726199,  lon: 106.6598401,  name: 'Góc 2' },
-            { lat: 10.7729915,  lon: 106.65962716, name: 'Góc 1' },
-            { lat: 10.7725605,  lon: 106.6588595,  name: 'Góc 4' },
-            { lat: 10.77225250, lon: 106.65900900, name: '→ WP trung gian' },
-        ],
-    };
-
-    var CUSTOM_ROUTE_COLOR = '#8b5cf6';
-
-    function drawDemoRoutes(map, demoLayers, routeList) {
-        var ff = FOOTBALL_FIELD;
-        var latlngs = [];
-        for (var i = 0; i < ff.corners.length; i++) {
-            latlngs.push([ff.corners[i].lat, ff.corners[i].lon]);
-        }
-        latlngs.push([ff.corners[0].lat, ff.corners[0].lon]);
-
-        var totalDist = 0;
-        for (var m = 1; m < latlngs.length; m++) {
-            totalDist += haversine(
-                { lat: latlngs[m - 1][0], lon: latlngs[m - 1][1] },
-                { lat: latlngs[m][0], lon: latlngs[m][1] }
-            );
-        }
-
-        var poly = L.polyline(latlngs, {
-            color: ff.color, weight: 5, opacity: 0.9, dashArray: '10 6',
-        }).addTo(map);
-        poly.bindPopup(
-            '<b>[Test] ' + ff.label + '</b><br>' +
-            'Waypoints: ' + latlngs.length + '<br>' +
-            'Chu vi: ' + totalDist.toFixed(1) + ' m'
-        );
-        demoLayers.push(poly);
-
-        for (var c = 0; c < ff.corners.length; c++) {
-            var pt = ff.corners[c];
-            var marker = L.circleMarker([pt.lat, pt.lon], {
-                radius: 7, fillColor: ff.color, color: '#fff', weight: 3, fillOpacity: 1,
-            }).addTo(map).bindPopup(
-                '<b>' + pt.name + '</b><br>' +
-                'Lat: ' + fmtCoord(pt.lat) + '<br>Lon: ' + fmtCoord(pt.lon)
-            );
-            demoLayers.push(marker);
-
-            L.marker([pt.lat, pt.lon], {
-                icon: L.divIcon({
-                    className: 'campus-label',
-                    html: pt.name,
-                    iconAnchor: [-8, 12],
-                }),
-                interactive: false,
-            }).addTo(map);
-        }
-
-        routeList.push({
-            id: 'demo-football',
-            pickup: ff.label,
-            status: 'Test (' + totalDist.toFixed(0) + 'm)',
-            color: ff.color,
-        });
-
-        drawCustomRoute(map, demoLayers, routeList);
-    }
-
-    function drawCustomRoute(map, demoLayers, routeList) {
-        var raw = localStorage.getItem('custom_scenario_points');
-        if (!raw) return;
-        try { var pts = JSON.parse(raw); } catch (e) { return; }
-        if (!Array.isArray(pts) || pts.length < 2) return;
-
-        var latlngs = [];
-        for (var i = 0; i < pts.length; i++) {
-            latlngs.push([Number(pts[i].lat), Number(pts[i].lon)]);
-        }
-
-        var totalDist = 0;
-        for (var m = 1; m < latlngs.length; m++) {
-            totalDist += haversine(
-                { lat: latlngs[m - 1][0], lon: latlngs[m - 1][1] },
-                { lat: latlngs[m][0], lon: latlngs[m][1] }
-            );
-        }
-
-        var poly = L.polyline(latlngs, {
-            color: CUSTOM_ROUTE_COLOR, weight: 5, opacity: 0.9, dashArray: '8 5',
-        }).addTo(map);
-        poly.bindPopup(
-            '<b>[Test] Kịch bản tùy chỉnh</b><br>' +
-            'Waypoints: ' + latlngs.length + '<br>' +
-            'Tổng: ' + totalDist.toFixed(1) + ' m'
-        );
-        demoLayers.push(poly);
-
-        for (var c = 0; c < latlngs.length; c++) {
-            var label = 'Điểm ' + (c + 1);
-            var marker = L.circleMarker(latlngs[c], {
-                radius: 7, fillColor: CUSTOM_ROUTE_COLOR, color: '#fff', weight: 3, fillOpacity: 1,
-            }).addTo(map).bindPopup(
-                '<b>' + label + '</b><br>' +
-                'Lat: ' + fmtCoord(latlngs[c][0]) + '<br>Lon: ' + fmtCoord(latlngs[c][1])
-            );
-            demoLayers.push(marker);
-
-            L.marker(latlngs[c], {
-                icon: L.divIcon({
-                    className: 'campus-label',
-                    html: '<span style="color:' + CUSTOM_ROUTE_COLOR + '">' + label + '</span>',
-                    iconAnchor: [-8, 12],
-                }),
-                interactive: false,
-            }).addTo(map);
-        }
-
-        routeList.push({
-            id: 'demo-custom',
-            pickup: 'Kịch bản tùy chỉnh (' + latlngs.length + ' điểm)',
-            status: 'Test (' + totalDist.toFixed(0) + 'm)',
-            color: CUSTOM_ROUTE_COLOR,
-        });
-    }
-
     var CONE_SIZE = 60;
 
     function makeRobotSvg(headingDeg) {
@@ -337,7 +76,6 @@
         var halfAngle = 25;
         var rot = (headingDeg != null) ? headingDeg : 0;
         var showCone = (headingDeg != null);
-
         var cone = '';
         if (showCone) {
             var rad1 = (rot - halfAngle) * Math.PI / 180;
@@ -348,46 +86,48 @@
             var x2 = cx + coneLen * Math.sin(rad2);
             var y2 = cy - coneLen * Math.cos(rad2);
             cone = '<path d="M' + cx + ',' + cy +
-                   ' L' + x1.toFixed(1) + ',' + y1.toFixed(1) +
-                   ' A' + coneLen + ',' + coneLen + ' 0 0,1 ' +
-                   x2.toFixed(1) + ',' + y2.toFixed(1) + ' Z"' +
-                   ' fill="url(#coneGrad)" />';
+                ' L' + x1.toFixed(1) + ',' + y1.toFixed(1) +
+                ' A' + coneLen + ',' + coneLen + ' 0 0,1 ' +
+                x2.toFixed(1) + ',' + y2.toFixed(1) + ' Z"' +
+                ' fill="url(#coneGradRtab)" />';
         }
-
-        var svg = '<svg width="' + (CONE_SIZE * 2) + '" height="' + (CONE_SIZE * 2) + '" xmlns="http://www.w3.org/2000/svg">' +
-            '<defs><radialGradient id="coneGrad" cx="50%" cy="50%" r="50%">' +
+        return '<svg width="' + (CONE_SIZE * 2) + '" height="' + (CONE_SIZE * 2) + '" xmlns="http://www.w3.org/2000/svg">' +
+            '<defs><radialGradient id="coneGradRtab" cx="50%" cy="50%" r="50%">' +
             '<stop offset="0%" stop-color="#3b82f6" stop-opacity="0.45"/>' +
             '<stop offset="100%" stop-color="#3b82f6" stop-opacity="0.0"/>' +
             '</radialGradient></defs>' +
             cone +
             '<circle cx="' + CONE_SIZE + '" cy="' + CONE_SIZE + '" r="' + r + '" fill="#ef4444" stroke="#fff" stroke-width="3"/>' +
             '</svg>';
-        return svg;
     }
 
-    // Khớp pathfinding local_to_gps: x=North, y=East
-    function poseXYToLatLng(north, east, refLat, refLon) {
-        var mPerDegLat = 111132.0;
-        var mPerDegLon = 111320.0 * Math.cos(refLat * Math.PI / 180);
-        if (Math.abs(mPerDegLon) < 1e-6) mPerDegLon = 111320.0;
-        return [refLat + north / mPerDegLat, refLon + east / mPerDegLon];
+    /** RTAB pose: translation tx, ty at float indices 3 and 7 — same convention as robot x,y on map plane */
+    function worldToMapLatLng(wx, wy, b) {
+        return L.latLng(b.ymax - wy, wx - b.xmin);
+    }
+
+    function haversineMeters(a, b) {
+        var dx = a[0] - b[0], dy = a[1] - b[1];
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function mapLatLngToWorld(ll, bb) {
+        return [ll.lng + bb.xmin, bb.ymax - ll.lat];
     }
 
     function adminTracking(cfg) {
         cfg = cfg || {};
         var topicPose = cfg.topicPose || 'UGV/localization/pose';
-        var refLat = Number(cfg.originLat) || 10.77202433;
-        var refLon = Number(cfg.originLon) || 106.65860867;
+        var graphUrl = cfg.graphUrl || '/api/admin/rtab-map/graph';
 
         var map = null;
+        var graphBounds = null;
         var robotMarker = null;
-        var routeLayers = [];
-        var demoLayers = [];
-
         var trailLine = null;
         var trailCoords = [];
-        var MIN_TRAIL_DIST = 0.5;
+        var MIN_TRAIL_DIST = 0.08;
         var currentHeadingDeg = null;
+        var canvasRenderer = null;
 
         function updateRobotIcon() {
             if (!robotMarker) return;
@@ -399,43 +139,104 @@
             }));
         }
 
+        function poseToMapLL(nx, ny) {
+            if (!graphBounds) return null;
+            return worldToMapLatLng(nx, ny, graphBounds);
+        }
+
         return {
             topicPoseLabel: topicPose,
+            dbLabel: cfg.rtabDbLabel || 'A5_night.db',
             conn: 'disconnected',
             connLabel: 'Chưa kết nối',
             errDetail: '',
+            graphErr: '',
+            graphMeta: '',
+            mapReady: false,
             poseX: null,
             poseY: null,
             poseYaw: null,
             trailCount: 0,
-            routeList: [],
 
             init: function () {
                 var self = this;
+                this._boot().catch(function (e) {
+                    self.graphErr = (e && e.message) ? e.message : 'Không tải được bản đồ';
+                });
+            },
 
-                map = L.map('admin-map').setView(CENTER, 17);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    maxZoom: 20,
-                    attribution: '&copy; OpenStreetMap',
-                }).addTo(map);
+            _boot: async function () {
+                var self = this;
+                var res = await fetch(graphUrl, { credentials: 'same-origin' });
+                var graph = await res.json().catch(function () { return null; });
+                if (!graph || !graph.success) {
+                    self.graphErr = (graph && graph.message) || 'API graph không hợp lệ';
+                    return;
+                }
+                graphBounds = graph.bounds;
+                var b = graphBounds;
+                var h = b.ymax - b.ymin;
+                var w = b.xmax - b.xmin;
+                self.graphMeta = 'Nguồn: ' + (graph.source || 'RTAB-Map') + ' — ' +
+                    (graph.nodes ? graph.nodes.length : 0) + ' node, ' +
+                    (graph.links ? graph.links.length : 0) + ' cạnh láng giềng';
 
-                addWaypoints(map);
-                drawDemoRoutes(map, demoLayers, self.routeList);
+                map = L.map('admin-map', {
+                    crs: L.CRS.Simple,
+                    minZoom: -4,
+                    maxZoom: 4,
+                    zoomSnap: 0.25,
+                    attributionControl: true,
+                });
+                map.attributionControl.setPrefix('');
+                map.attributionControl.addAttribution('RTAB-Map graph (local meters)');
 
-                window.addEventListener('storage', function (e) {
-                    if (e.key === 'custom_scenario_points') {
-                        self._refreshCustomRoute();
-                    }
+                canvasRenderer = L.canvas({ padding: 0.5 });
+
+                var posById = {};
+                (graph.nodes || []).forEach(function (n) {
+                    posById[n.id] = [n.x, n.y];
                 });
 
+                (graph.links || []).forEach(function (link) {
+                    var a = posById[link[0]], bb = posById[link[1]];
+                    if (!a || !bb) return;
+                    L.polyline(
+                        [worldToMapLatLng(a[0], a[1], b), worldToMapLatLng(bb[0], bb[1], b)],
+                        {
+                            renderer: canvasRenderer,
+                            weight: 1.2,
+                            opacity: 0.28,
+                            color: '#64748b',
+                            interactive: false,
+                        }
+                    ).addTo(map);
+                });
+
+                (graph.nodes || []).forEach(function (n) {
+                    var ll = worldToMapLatLng(n.x, n.y, b);
+                    L.circleMarker(ll, {
+                        renderer: canvasRenderer,
+                        radius: 2.5,
+                        fillColor: '#0ea5e9',
+                        color: '#0369a1',
+                        weight: 0.5,
+                        fillOpacity: 0.65,
+                    }).addTo(map).bindPopup(
+                        '<b>Node ' + n.id + '</b><br>x: ' + Number(n.x).toFixed(3) + ' m<br>y: ' + Number(n.y).toFixed(3) + ' m'
+                    );
+                });
+
+                map.fitBounds(L.latLngBounds(L.latLng(h, 0), L.latLng(0, w)));
                 trailLine = L.polyline([], {
                     color: '#f97316',
                     weight: 3,
-                    opacity: 0.85,
+                    opacity: 0.88,
                     lineJoin: 'round',
                 }).addTo(map);
 
-                robotMarker = L.marker(CENTER, {
+                var startLL = worldToMapLatLng((b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, b);
+                robotMarker = L.marker(startLL, {
                     icon: L.divIcon({
                         className: '',
                         html: makeRobotSvg(null),
@@ -444,10 +245,8 @@
                     }),
                 }).addTo(map).bindPopup('Robot');
 
+                self.mapReady = true;
                 setTimeout(function () { map.invalidateSize(); }, 200);
-
-                this._loadRoutes();
-                setInterval(function () { self._loadRoutes(); }, 15000);
 
                 var client = window.AdminMqtt.connect('', '', function (state, detail) {
                     self.conn = state;
@@ -473,24 +272,24 @@
                         self.poseY = ny.toFixed(4);
                         self.poseYaw = yw != null ? yw.toFixed(4) : '—';
 
-                        var ll = poseXYToLatLng(nx, ny, refLat, refLon);
-                        var lat = ll[0], lng = ll[1];
                         var deg = yw != null ? (yw * 180 / Math.PI) : null;
                         currentHeadingDeg = deg;
                         updateRobotIcon();
 
-                        robotMarker.setLatLng([lat, lng]);
-                        map.panTo([lat, lng]);
+                        var ll = poseToMapLL(nx, ny);
+                        if (!ll) return;
+                        robotMarker.setLatLng(ll);
 
                         var dominated = false;
                         if (trailCoords.length > 0) {
                             var prev = trailCoords[trailCoords.length - 1];
-                            var d = haversine({ lat: prev[0], lon: prev[1] }, { lat: lat, lon: lng });
+                            var pw = mapLatLngToWorld(prev, b);
+                            var d = haversineMeters(pw, [nx, ny]);
                             if (d < MIN_TRAIL_DIST) dominated = true;
                         }
                         if (!dominated) {
-                            trailCoords.push([lat, lng]);
-                            trailLine.addLatLng([lat, lng]);
+                            trailCoords.push(ll);
+                            trailLine.addLatLng(ll);
                             self.trailCount = trailCoords.length;
                         }
                     });
@@ -499,63 +298,8 @@
 
             clearTrail: function () {
                 trailCoords = [];
-                trailLine.setLatLngs([]);
+                if (trailLine) trailLine.setLatLngs([]);
                 this.trailCount = 0;
-            },
-
-            _refreshCustomRoute: function () {
-                var self = this;
-                for (var k = demoLayers.length - 1; k >= 0; k--) {
-                    map.removeLayer(demoLayers[k]);
-                }
-                demoLayers = [];
-                self.routeList = self.routeList.filter(function (r) { return r.id.indexOf('demo-') !== 0; });
-                drawDemoRoutes(map, demoLayers, self.routeList);
-            },
-
-            _loadRoutes: function () {
-                var self = this;
-                fetch('/api/admin/bookings/routes', { credentials: 'same-origin' })
-                    .then(function (r) { return r.json(); })
-                    .then(function (data) {
-                        if (!data.success) return;
-                        for (var k = 0; k < routeLayers.length; k++) map.removeLayer(routeLayers[k]);
-                        routeLayers = [];
-                        var demoEntries = self.routeList.filter(function (r) { return r.id.indexOf('demo-') === 0; });
-                        self.routeList = demoEntries;
-
-                        var routes = data.routes || [];
-                        for (var i = 0; i < routes.length; i++) {
-                            var rt = routes[i];
-                            var color = ROUTE_COLORS[i % ROUTE_COLORS.length];
-                            var latlngs = [];
-                            for (var j = 0; j < rt.coords.length; j++) {
-                                latlngs.push([rt.coords[j].lat, rt.coords[j].lon]);
-                            }
-                            var poly = L.polyline(latlngs, {
-                                color: color, weight: 4, opacity: 0.85,
-                            }).addTo(map);
-                            poly.bindPopup(
-                                '<b>' + rt.pickup_name + ' → Thư viện</b><br>' +
-                                'Đơn: ' + rt.booking_id + '<br>' +
-                                'Trạng thái: ' + rt.status
-                            );
-                            routeLayers.push(poly);
-
-                            var startIcon = L.circleMarker(latlngs[0], {
-                                radius: 7, fillColor: color, color: '#fff', weight: 2, fillOpacity: 1,
-                            }).addTo(map).bindPopup('Điểm nhận: ' + rt.pickup_name);
-                            routeLayers.push(startIcon);
-
-                            self.routeList.push({
-                                id: rt.booking_id,
-                                pickup: rt.pickup_name,
-                                status: rt.status,
-                                color: color,
-                            });
-                        }
-                    })
-                    .catch(function (err) { console.warn('[routes]', err); });
             },
         };
     }

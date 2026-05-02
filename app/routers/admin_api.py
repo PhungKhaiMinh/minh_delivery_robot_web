@@ -44,6 +44,7 @@ from app.services.pickup_locations_store import (
 )
 from app.services.robot_waypoints_dataset_store import get_waypoints_dataset, set_waypoints_dataset
 from app.services.admin_route_planner import plan_field_route
+from app.services.rtab_map_graph_service import build_rtab_graph_json
 
 router = APIRouter(prefix="/api/admin", tags=["Admin API"])
 
@@ -76,6 +77,13 @@ async def admin_mqtt_config(request: Request):
             },
         }
     )
+
+
+@router.get("/rtab-map/graph")
+async def admin_rtab_map_graph(request: Request):
+    """Graph RTAB-Map (Node pose + Link neighbor) cho bản đồ CRS.Simple trên Admin Tracking."""
+    require_admin(request)
+    return JSONResponse(content=build_rtab_graph_json())
 
 
 @router.get("/bookings/active")
