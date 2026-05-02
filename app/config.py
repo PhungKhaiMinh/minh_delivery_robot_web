@@ -188,8 +188,10 @@ CAMPUS_ORIGIN_ALT = float(os.getenv("CAMPUS_ORIGIN_ALT", "0.0"))
 # Railway: gắn Volume (vd. mount /data) và đặt RTAB_MAP_DB_PATH=/data/A5_night.db — file không nằm trong Git.
 RTAB_MAP_DB_PATH = os.getenv("RTAB_MAP_DB_PATH", str(BASE_DIR / "A5_night.db"))
 RTAB_MAP_DB_MAX_BYTES = int(os.getenv("RTAB_MAP_DB_MAX_BYTES", str(260 * 1024 * 1024)))
-# Điểm môi trường (laser / obstacle) gửi lên Tracking — giới hạn để JSON nhẹ
-RTAB_MAP_ENV_MAX_POINTS = int(os.getenv("RTAB_MAP_ENV_MAX_POINTS", "20000"))
+# Điểm môi trường (laser / obstacle) dùng khi build raster / hoặc gửi raw khi raster=0
+RTAB_MAP_ENV_MAX_POINTS = int(os.getenv("RTAB_MAP_ENV_MAX_POINTS", "96000"))
+# Cạnh dài nhất (px) của PNG môi trường server gửi về — giảm nếu cần tiết kiệm RAM/CPU
+RTAB_MAP_ENV_RASTER_MAX_SIDE = int(os.getenv("RTAB_MAP_ENV_RASTER_MAX_SIDE", "1680"))
 
 # === MQTT topic gửi waypoints cho robot di chuyển ===
 MQTT_TOPIC_PATH = os.getenv("MQTT_TOPIC_PATH", "UGV/path_topic")

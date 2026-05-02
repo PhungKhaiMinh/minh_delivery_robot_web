@@ -4,7 +4,8 @@
 {% block admin_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 <style>
-#admin-map { min-height: 560px; border-radius: 1rem; z-index: 1; background: #f1f5f9; }
+#admin-map { min-height: 560px; border-radius: 1rem; z-index: 1; background: #e8edf3; }
+.leaflet-image-layer.rtab-env-raster { mix-blend-mode: multiply; image-rendering: auto; }
 </style>
 {% endblock %}
 
@@ -15,7 +16,7 @@
     "topicPose": mqtt_topic_pose,
     "mqttUser": mqtt_username,
     "mqttPass": mqtt_password,
-    "graphUrl": "/api/admin/rtab-map/graph?env=1",
+    "graphUrl": "/api/admin/rtab-map/graph?env=1&raster=1",
     "rtabDbLabel": rtab_map_db_path,
 } %}
 <div class="max-w-7xl mx-auto space-y-6" x-data='adminTracking({{ tracking_cfg|tojson }})'>
@@ -23,7 +24,8 @@
         <h1 class="text-2xl font-bold text-slate-900">Tracking</h1>
         <p class="text-sm text-slate-500 mt-1">
             Bản đồ lấy từ file RTAB-Map <code class="text-xs bg-slate-200 px-1 rounded" x-text="dbLabel"></code>:
-            graph (node pose + láng giềng) và mẫu điểm môi trường từ <code class="text-xs">scan</code> / <code class="text-xs">obstacle_cells</code> (đám mây 2D trong khung world).
+            Graph (node + láng giềng) và môi trường dạng <strong>PNG raster</strong> (tích lũy scan/obstacle trên server — nhẹ hơn nhiều so với hàng chục nghìn điểm JSON).
+            Debug: thêm tham số URL <code class="text-xs">raster=0</code> để nhận <code class="text-xs">env_points</code> thô (JSON rất nặng).
             The map loads from the server — same URL, same admins see the same data.
             Nếu chưa có map trên server: vào <a href="/admin/settings" class="text-sky-700 font-medium hover:underline">Settings</a> để tải <code class="text-xs bg-slate-200 px-1 rounded">.db</code> một lần (Railway: Volume + <code class="text-xs bg-slate-200 px-1 rounded">RTAB_MAP_DB_PATH</code>).
             Hệ trục hiển thị trùng với tọa độ local <strong>x, y</strong> (mét) từ
@@ -121,7 +123,7 @@
     function adminTracking(cfg) {
         cfg = cfg || {};
         var topicPose = cfg.topicPose || 'UGV/localization/pose';
-        var graphUrl = cfg.graphUrl || '/api/admin/rtab-map/graph?env=1';
+        var graphUrl = cfg.graphUrl || '/api/admin/rtab-map/graph?env=1&raster=1';
 
         var map = null;
         var graphBounds = null;
@@ -181,10 +183,11 @@
                 var h = b.ymax - b.ymin;
                 var w = b.xmax - b.xmin;
                 var envN = (graph.env_points && graph.env_points.length) ? graph.env_points.length : 0;
+                var rw = graph.env_raster_w || 0, rh = graph.env_raster_h || 0;
                 self.graphMeta = 'Nguồn: ' + (graph.source || 'RTAB-Map') + ' — ' +
                     (graph.nodes ? graph.nodes.length : 0) + ' node, ' +
                     (graph.links ? graph.links.length : 0) + ' cạnh láng giềng' +
-                    (envN ? (', ' + envN + ' điểm môi trường (subsample)') : '');
+                    (rw > 0 ? (', môi trường PNG ' + rw + '×' + rh) : (envN ? (', ' + envN + ' điểm env (raw)') : ''));
 
                 map = L.map('admin-map', {
                     crs: L.CRS.Simple,
@@ -194,7 +197,16 @@
                     attributionControl: true,
                 });
                 map.attributionControl.setPrefix('');
-                map.attributionControl.addAttribution('RTAB-Map — graph + env samples (m)');
+                map.attributionControl.addAttribution('RTAB-Map — graph + env (PNG / m)');
+
+                var rasterBounds = L.latLngBounds(L.latLng(h, 0), L.latLng(0, w));
+                if (graph.env_raster_png_b64 && graph.env_raster_w > 0) {
+                    L.imageOverlay(
+                        'data:image/png;base64,' + graph.env_raster_png_b64,
+                        rasterBounds,
+                        { opacity: 0.92, interactive: false, className: 'rtab-env-raster' }
+                    ).addTo(map);
+                }
 
                 canvasRenderer = L.canvas({ padding: 0.5 });
 
@@ -232,22 +244,24 @@
                     );
                 });
 
-                var envPts = graph.env_points || [];
-                var envStride = 1;
-                if (envPts.length > 18000) envStride = 2;
-                if (envPts.length > 36000) envStride = 3;
-                for (var ei = 0; ei < envPts.length; ei += envStride) {
-                    var q = envPts[ei];
-                    if (!q || q.length < 2) continue;
-                    L.circleMarker(worldToMapLatLng(Number(q[0]), Number(q[1]), b), {
-                        renderer: canvasRenderer,
-                        radius: 1.1,
-                        fillColor: '#94a3b8',
-                        color: '#94a3b8',
-                        weight: 0,
-                        fillOpacity: 0.35,
-                        interactive: false,
-                    }).addTo(map);
+                if (!(graph.env_raster_png_b64 && graph.env_raster_w > 0)) {
+                    var envPts = graph.env_points || [];
+                    var envStride = 1;
+                    if (envPts.length > 18000) envStride = 2;
+                    if (envPts.length > 36000) envStride = 3;
+                    for (var ei = 0; ei < envPts.length; ei += envStride) {
+                        var q = envPts[ei];
+                        if (!q || q.length < 2) continue;
+                        L.circleMarker(worldToMapLatLng(Number(q[0]), Number(q[1]), b), {
+                            renderer: canvasRenderer,
+                            radius: 1.4,
+                            fillColor: '#475569',
+                            color: '#475569',
+                            weight: 0,
+                            fillOpacity: 0.55,
+                            interactive: false,
+                        }).addTo(map);
+                    }
                 }
 
                 map.fitBounds(L.latLngBounds(L.latLng(h, 0), L.latLng(0, w)));

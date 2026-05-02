@@ -7,6 +7,8 @@ Link type 0 = kNeighbor (theo RTAB-Map).
 
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 import sqlite3
 import struct
@@ -15,7 +17,12 @@ import zlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from app.config import RTAB_MAP_DB_MAX_BYTES, RTAB_MAP_DB_PATH, RTAB_MAP_ENV_MAX_POINTS
+from app.config import (
+    RTAB_MAP_DB_MAX_BYTES,
+    RTAB_MAP_DB_PATH,
+    RTAB_MAP_ENV_MAX_POINTS,
+    RTAB_MAP_ENV_RASTER_MAX_SIDE,
+)
 
 
 def _pose_tx_ty(blob: bytes) -> Optional[Tuple[float, float]]:
@@ -70,39 +77,54 @@ def _world_xy_from_pose_and_local(f12: Tuple[float, ...], lx: float, ly: float) 
 
 def _collect_env_xy_points(con: sqlite3.Connection, max_points: int) -> Tuple[List[List[float]], int, int]:
     """
-    Gom điểm laser / obstacle (CV_32FC2) vào world XY. Trả (points, nodes_used, pair_samples).
+    Gom điểm laser (scan) + occupancy obstacle (CV_32FC2, local) vào world XY.
+
+    Phân bổ đều theo **mọi node** (không còn bỏ qua 3/4 node): mỗi node nhận phần ngân sách
+    còn lại / số node chưa xử lý — tránh chỉ dày ở đầu danh sách DB.
     """
     rows = list(
         con.execute(
             "SELECT n.pose, d.scan, d.obstacle_cells FROM Node n "
-            "INNER JOIN Data d ON n.id = d.id"
+            "INNER JOIN Data d ON n.id = d.id ORDER BY n.id"
         )
     )
     if not rows or max_points < 1:
         return [], 0, 0
 
-    node_step = max(1, len(rows) // max(1, min(500, max(50, max_points // 50))))
-    per_node_pairs = max(24, max_points // max(1, (len(rows) // node_step) + 1) // 3)
-
+    n_rows = len(rows)
     out: List[List[float]] = []
     nodes_used = 0
     pair_samples = 0
 
     for idx, (pose_b, scan_b, obs_b) in enumerate(rows):
-        if idx % node_step != 0:
-            continue
+        if len(out) >= max_points:
+            break
         if not pose_b or len(pose_b) < 48:
             continue
         try:
             f12 = struct.unpack("12f", bytes(pose_b)[:48])
         except struct.error:
             continue
+
+        remaining = max_points - len(out)
+        nodes_left = n_rows - idx
+        budget_here = max(4, remaining // max(1, nodes_left))
+
+        blobs: List[bytes] = []
+        if scan_b:
+            blobs.append(bytes(scan_b))
+        if obs_b:
+            blobs.append(bytes(obs_b))
+        if not blobs:
+            continue
+
+        per_blob = max(2, budget_here // len(blobs))
         nodes_used += 1
 
-        for blob in (scan_b, obs_b):
-            if not blob or len(out) >= max_points:
+        for blob in blobs:
+            if len(out) >= max_points:
                 break
-            mat = _uncompress_rtab_cv_blob(bytes(blob))
+            mat = _uncompress_rtab_cv_blob(blob)
             if not mat:
                 continue
             h, w, typ, raw = mat
@@ -118,7 +140,12 @@ def _collect_env_xy_points(con: sqlite3.Connection, max_points: int) -> Tuple[Li
             n_pairs = len(floats) // 2
             if n_pairs < 1:
                 continue
-            pair_step = max(1, n_pairs // per_node_pairs)
+
+            room = max_points - len(out)
+            take = min(per_blob, room, n_pairs)
+            if take < 1:
+                continue
+            pair_step = max(1, n_pairs // take)
             for pi in range(0, n_pairs, pair_step):
                 j = pi * 2
                 if j + 1 >= len(floats):
@@ -132,11 +159,96 @@ def _collect_env_xy_points(con: sqlite3.Connection, max_points: int) -> Tuple[Li
     return out, nodes_used, pair_samples
 
 
+def _png_chunk(tag: bytes, data: bytes) -> bytes:
+    crc = binascii.crc32(tag + data) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
+
+
+def _png_grey8(width: int, height: int, grey: bytes) -> bytes:
+    if len(grey) != width * height:
+        raise ValueError("raster size mismatch")
+    buf = bytearray()
+    for y in range(height):
+        buf.append(0)
+        buf.extend(grey[y * width : (y + 1) * width])
+    z = zlib.compress(bytes(buf), 6)
+    ihdr = struct.pack(">2I5B", width, height, 8, 0, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", z)
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def _raster_env_to_grey_bytes(
+    env_points: List[List[float]],
+    bounds: Dict[str, float],
+    max_side: int,
+) -> Optional[Tuple[int, int, bytes]]:
+    """Tích lũy điểm vào lưới greyscale 8-bit (PNG), trả (cw, ch, pixels) hoặc None."""
+    if not env_points or max_side < 64:
+        return None
+    xmin, xmax = float(bounds["xmin"]), float(bounds["xmax"])
+    ymin, ymax = float(bounds["ymin"]), float(bounds["ymax"])
+    rw = xmax - xmin
+    rh = ymax - ymin
+    if rw <= 0 or rh <= 0:
+        return None
+    ar = rw / rh if rh else 1.0
+    if ar >= 1.0:
+        cw = min(max_side, max(320, max_side))
+        ch = max(1, int(round(cw / ar)))
+    else:
+        ch = min(max_side, max(320, max_side))
+        cw = max(1, int(round(ch * ar)))
+    cw = max(1, min(cw, max_side))
+    ch = max(1, min(ch, max_side))
+    acc = bytearray(cw * ch)
+    step = 24
+    for q in env_points:
+        try:
+            wx, wy = float(q[0]), float(q[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        ix = int((wx - xmin) / rw * (cw - 1))
+        iy = int((ymax - wy) / rh * (ch - 1))
+        if 0 <= ix < cw and 0 <= iy < ch:
+            k = iy * cw + ix
+            acc[k] = min(255, acc[k] + step)
+    if max(acc) == 0:
+        return None
+    grey = bytes(acc)
+    # Làm dày nhẹ (tường mảnh / laser thưa) — một bước hàng xóm
+    out = bytearray(grey)
+    for y in range(ch):
+        for x in range(cw):
+            k = y * cw + x
+            m = grey[k]
+            if m == 0:
+                continue
+            for dy in (-1, 0, 1):
+                yy = y + dy
+                if yy < 0 or yy >= ch:
+                    continue
+                base = yy * cw
+                for dx in (-1, 0, 1):
+                    xx = x + dx
+                    if xx < 0 or xx >= cw:
+                        continue
+                    nk = base + xx
+                    boost = m - 22 if (dy != 0 or dx != 0) else m
+                    if boost > 0:
+                        out[nk] = min(255, max(out[nk], boost))
+    return cw, ch, bytes(out)
+
+
 def build_rtab_graph_json(
     db_path: Optional[str] = None,
     include_environment: bool = True,
+    include_raster: bool = True,
 ) -> Dict[str, Any]:
-    """Trả JSON cho Leaflet CRS.Simple: bounds, nodes, links (neighbor, deduped)."""
+    """Trả JSON cho Leaflet CRS.Simple: bounds, nodes, links; môi trường mặc định là PNG raster (nhẹ)."""
     path = Path(db_path or RTAB_MAP_DB_PATH).resolve()
     if not path.is_file():
         return {
@@ -149,6 +261,9 @@ def build_rtab_graph_json(
             "env_points": [],
             "env_nodes_sampled": 0,
             "env_pair_samples": 0,
+            "env_raster_w": 0,
+            "env_raster_h": 0,
+            "env_raster_png_b64": "",
         }
 
     con: Optional[sqlite3.Connection] = None
@@ -178,6 +293,9 @@ def build_rtab_graph_json(
                 "env_points": [],
                 "env_nodes_sampled": 0,
                 "env_pair_samples": 0,
+                "env_raster_w": 0,
+                "env_raster_h": 0,
+                "env_raster_png_b64": "",
             }
 
         seen: Set[Tuple[int, int]] = set()
@@ -205,7 +323,7 @@ def build_rtab_graph_json(
         if include_environment:
             try:
                 env_points, env_nodes_used, env_pairs = _collect_env_xy_points(
-                    con, max_points=max(1000, min(RTAB_MAP_ENV_MAX_POINTS, 100000))
+                    con, max_points=max(2000, min(RTAB_MAP_ENV_MAX_POINTS, 200000))
                 )
             except (sqlite3.Error, struct.error, zlib.error, MemoryError):
                 env_points = []
@@ -225,6 +343,26 @@ def build_rtab_graph_json(
             "ymax": ymax + pad,
         }
 
+        env_raster_w = 0
+        env_raster_h = 0
+        env_raster_png_b64 = ""
+        if include_environment and include_raster and env_points:
+            try:
+                rast = _raster_env_to_grey_bytes(
+                    env_points,
+                    bounds,
+                    max(256, min(4096, RTAB_MAP_ENV_RASTER_MAX_SIDE)),
+                )
+                if rast is not None:
+                    cw_r, ch_r, grey = rast
+                    png_bytes = _png_grey8(cw_r, ch_r, grey)
+                    env_raster_w = cw_r
+                    env_raster_h = ch_r
+                    env_raster_png_b64 = base64.standard_b64encode(png_bytes).decode("ascii")
+                    env_points = []
+            except (ValueError, MemoryError, zlib.error, OSError):
+                pass
+
         return {
             "success": True,
             "message": None,
@@ -235,6 +373,9 @@ def build_rtab_graph_json(
             "env_points": env_points,
             "env_nodes_sampled": env_nodes_used,
             "env_pair_samples": env_pairs,
+            "env_raster_w": env_raster_w,
+            "env_raster_h": env_raster_h,
+            "env_raster_png_b64": env_raster_png_b64,
         }
     except sqlite3.Error as exc:
         return {
@@ -247,6 +388,9 @@ def build_rtab_graph_json(
             "env_points": [],
             "env_nodes_sampled": 0,
             "env_pair_samples": 0,
+            "env_raster_w": 0,
+            "env_raster_h": 0,
+            "env_raster_png_b64": "",
         }
     finally:
         if con is not None:

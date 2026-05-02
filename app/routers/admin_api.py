@@ -87,10 +87,19 @@ async def admin_mqtt_config(request: Request):
 async def admin_rtab_map_graph(
     request: Request,
     env: int = Query(1, description="1 = gồm điểm scan/obstacle (môi trường), 0 = chỉ graph"),
+    raster: int = Query(
+        1,
+        description="1 = PNG raster (payload nhỏ, tường rõ), 0 = trả env_points JSON (debug, nặng)",
+    ),
 ):
-    """Graph RTAB-Map (Node pose + Link neighbor; tùy chọn điểm laser/obstacle từ Data) cho Admin Tracking."""
+    """Graph RTAB-Map cho Admin Tracking; môi trường mặc định là PNG raster."""
     require_admin(request)
-    return JSONResponse(content=build_rtab_graph_json(include_environment=(env != 0)))
+    return JSONResponse(
+        content=build_rtab_graph_json(
+            include_environment=(env != 0),
+            include_raster=(raster != 0),
+        )
+    )
 
 
 @router.get("/rtab-map/status")
