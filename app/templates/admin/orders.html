@@ -252,9 +252,11 @@
                         <th class="px-3 py-2 text-right font-medium">Lon</th>
                         <th class="px-3 py-2 text-right font-medium">X center (m)</th>
                         <th class="px-3 py-2 text-right font-medium">Y center (m)</th>
+                        <th class="px-3 py-2 text-center font-medium w-[5.5rem]">Từ GPS</th>
                         <th class="px-3 py-2 text-right font-medium">X margin (m)</th>
                         <th class="px-3 py-2 text-right font-medium">Y margin (m)</th>
-                        <th class="px-3 py-2 text-left font-medium w-32"></th>
+                        <th class="px-3 py-2 text-center font-medium w-[5.5rem]">Từ GPS</th>
+                        <th class="px-3 py-2 text-left font-medium w-24"></th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
@@ -289,6 +291,10 @@
                                 <input type="text" inputmode="decimal" x-model="r.yStr" spellcheck="false"
                                     class="w-full min-w-[5.5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
                             </td>
+                            <td class="px-3 py-2 align-middle text-center">
+                                <button type="button" @click="resetCenterFromGps(i)" title="Đặt X/Y center theo Lat/Lon (GPS → local)"
+                                    class="text-xs font-semibold text-sky-700 hover:underline whitespace-nowrap">Từ GPS</button>
+                            </td>
                             <td class="px-3 py-2">
                                 <input type="text" inputmode="decimal" x-model="r.mxStr" spellcheck="false"
                                     class="w-full min-w-[5.5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
@@ -297,9 +303,11 @@
                                 <input type="text" inputmode="decimal" x-model="r.myStr" spellcheck="false"
                                     class="w-full min-w-[5.5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
                             </td>
-                            <td class="px-3 py-2 align-top whitespace-nowrap space-y-1">
-                                <button type="button" @click="resetRow(i)"
-                                    class="block text-xs font-semibold text-sky-700 hover:underline">Từ GPS</button>
+                            <td class="px-3 py-2 align-middle text-center">
+                                <button type="button" @click="resetMarginFromGps(i)" title="Đặt X/Y margin theo mặc định GPS (cùng gốc center)"
+                                    class="text-xs font-semibold text-indigo-700 hover:underline whitespace-nowrap">Từ GPS</button>
+                            </td>
+                            <td class="px-3 py-2 align-top whitespace-nowrap">
                                 <button type="button" @click="removeRow(i)" x-show="rows.length > 1"
                                     class="block text-xs font-semibold text-red-600 hover:underline">Xóa</button>
                             </td>
@@ -845,11 +853,52 @@ window._doDeleteOrder = async function (id) {
                 this.rows.splice(i, 1);
             },
 
-            resetRow(i) {
+            async resetCenterFromGps(i) {
                 var r = this.rows[i];
                 if (!r) return;
+                var lat = parseFloat(String(r.latStr || '').replace(',', '.'));
+                var lng = parseFloat(String(r.lngStr || '').replace(',', '.'));
+                if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+                    try {
+                        var res = await fetch('/api/admin/gps-to-local', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ lat: lat, lon: lng }),
+                        });
+                        var data = await res.json().catch(function () { return null; });
+                        if (res.ok && data && data.success && data.x != null && data.y != null) {
+                            r.xStr = Number(data.x).toFixed(4);
+                            r.yStr = Number(data.y).toFixed(4);
+                            return;
+                        }
+                    } catch (e) { /* fallback */ }
+                }
                 r.xStr = Number(r.default_x).toFixed(4);
                 r.yStr = Number(r.default_y).toFixed(4);
+            },
+
+            async resetMarginFromGps(i) {
+                var r = this.rows[i];
+                if (!r) return;
+                var lat = parseFloat(String(r.latStr || '').replace(',', '.'));
+                var lng = parseFloat(String(r.lngStr || '').replace(',', '.'));
+                if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+                    try {
+                        var res = await fetch('/api/admin/gps-to-local', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ lat: lat, lon: lng }),
+                        });
+                        var data = await res.json().catch(function () { return null; });
+                        if (res.ok && data && data.success && data.x != null && data.y != null) {
+                            r.mxStr = Number(data.x).toFixed(4);
+                            r.myStr = Number(data.y).toFixed(4);
+                            return;
+                        }
+                    } catch (e) { /* fallback */ }
+                }
                 var dmx = r.default_x_margin != null ? Number(r.default_x_margin) : r.default_x;
                 var dmy = r.default_y_margin != null ? Number(r.default_y_margin) : r.default_y;
                 r.mxStr = Number(dmx).toFixed(4);
