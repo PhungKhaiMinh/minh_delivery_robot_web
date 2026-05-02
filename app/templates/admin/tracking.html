@@ -119,6 +119,15 @@
         return L.latLng(b.ymax - wy, wx - b.xmin);
     }
 
+    /** Lật trái–phải (đối xứng qua trục dọc giữa bounds): dùng chỉ cho lớp graph xanh, không đổi raster / robot. */
+    function mirrorWorldX(wx, bb) {
+        return bb.xmin + bb.xmax - wx;
+    }
+
+    function graphNodeToMapLatLng(wx, wy, bb) {
+        return worldToMapLatLng(mirrorWorldX(wx, bb), wy, bb);
+    }
+
     function haversineMeters(a, b) {
         var dx = a[0] - b[0], dy = a[1] - b[1];
         return Math.sqrt(dx * dx + dy * dy);
@@ -234,6 +243,7 @@
                 }
 
                 canvasRenderer = L.canvas({ padding: 0.5 });
+                var svgRenderer = L.svg({ padding: 0.35 });
 
                 var graphStyle = (graph.env_raster_source === 'admin_opt_map')
                     ? { linkW: 1.15, linkOp: 0.58, linkHex: '#5eead4', nodeR: 2.35, nodeFill: '#14b8a6', nodeStroke: '#ccfbf1', nodeSw: 0.55 }
@@ -248,7 +258,7 @@
                     var a = posById[link[0]], bb = posById[link[1]];
                     if (!a || !bb) return;
                     L.polyline(
-                        [worldToMapLatLng(a[0], a[1], b), worldToMapLatLng(bb[0], bb[1], b)],
+                        [graphNodeToMapLatLng(a[0], a[1], b), graphNodeToMapLatLng(bb[0], bb[1], b)],
                         {
                             renderer: canvasRenderer,
                             weight: graphStyle.linkW,
@@ -260,17 +270,25 @@
                 });
 
                 (graph.nodes || []).forEach(function (n) {
-                    var ll = worldToMapLatLng(n.x, n.y, b);
+                    var ll = graphNodeToMapLatLng(n.x, n.y, b);
+                    var xf = Number(n.x), yf = Number(n.y);
+                    var popupHtml = '<div class="text-sm">' +
+                        '<div class="font-semibold text-slate-800">Node ' + n.id + '</div>' +
+                        '<div class="mt-1 font-mono text-slate-700">x = ' + xf.toFixed(3) + ' m</div>' +
+                        '<div class="font-mono text-slate-700">y = ' + yf.toFixed(3) + ' m</div>' +
+                        '<div class="mt-1 text-xs text-slate-500">Tọa độ từ DB (m). Graph xanh đã lật trái–phải so với raster.</div>' +
+                        '<div class="text-xs text-slate-500">DB coordinates (m). Cyan graph is mirrored L–R vs raster.</div>' +
+                        '</div>';
                     L.circleMarker(ll, {
-                        renderer: canvasRenderer,
+                        renderer: svgRenderer,
                         radius: graphStyle.nodeR,
                         fillColor: graphStyle.nodeFill,
                         color: graphStyle.nodeStroke,
                         weight: graphStyle.nodeSw,
                         fillOpacity: 0.9,
-                    }).addTo(map).bindPopup(
-                        '<b>Node ' + n.id + '</b><br>x: ' + Number(n.x).toFixed(3) + ' m<br>y: ' + Number(n.y).toFixed(3) + ' m'
-                    );
+                        interactive: true,
+                        bubblingMouseEvents: true,
+                    }).addTo(map).bindPopup(popupHtml, { maxWidth: 260, closeButton: true, autoPan: true });
                 });
 
                 if (!(graph.env_raster_png_b64 && graph.env_raster_w > 0)) {
