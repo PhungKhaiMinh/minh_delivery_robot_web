@@ -211,8 +211,10 @@ def _raster_env_to_grey_bytes(
             wx, wy = float(q[0]), float(q[1])
         except (TypeError, ValueError, IndexError):
             continue
+        # Leaflet ImageOverlay: pixel row 0 = bounds NorthWest = max(lat) = ymax - wy → wy = ymin.
+        # Do not use (ymax - wy) here or the PNG is flipped vs CRS.Simple + graph polylines.
         ix = int((wx - xmin) / rw * (cw - 1))
-        iy = int((ymax - wy) / rh * (ch - 1))
+        iy = int((wy - ymin) / rh * (ch - 1))
         if 0 <= ix < cw and 0 <= iy < ch:
             k = iy * cw + ix
             acc[k] = min(255, acc[k] + step)

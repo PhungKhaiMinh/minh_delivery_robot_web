@@ -192,8 +192,11 @@
                 map = L.map('admin-map', {
                     crs: L.CRS.Simple,
                     minZoom: -4,
-                    maxZoom: 4,
+                    maxZoom: 12,
+                    maxBoundsViscosity: 1.0,
                     zoomSnap: 0.25,
+                    zoomDelta: 0.5,
+                    wheelPxPerZoomLevel: 40,
                     attributionControl: true,
                 });
                 map.attributionControl.setPrefix('');
