@@ -29,6 +29,8 @@ from app.config import (
     RTAB_MAP_DB_PATH,
     RTAB_MAP_ENV_MAX_POINTS,
     RTAB_MAP_ENV_RASTER_MAX_SIDE,
+    RTAB_MAP_OPT_MAP_MAX_PIXELS,
+    RTAB_MAP_OPT_MAP_MAX_SIDE,
 )
 
 
@@ -140,16 +142,53 @@ def _load_optimized_poses_by_id(con: sqlite3.Connection) -> Dict[int, Tuple[floa
 
 
 def _occ_byte_to_grey(v: int) -> int:
-    """Occupancy RTAB: 0 free, 100 obstacle, 255 unknown — hiển thị đủ vùng đã map (không chỉ chấm trắng)."""
+    """
+    Occupancy RTAB (Graph View style): 0 free, 100 obstacle, 255 unknown.
+    Tông tối cho ô trống, tường sáng rõ, unknown tách biệt — gần DB Viewer.
+    """
     if v == 100:
-        return 252
+        return 250
     if v == 0:
-        return 18
+        return 11
     if v == 255:
-        return 48
+        return 44
     if 1 <= v <= 99:
-        return min(255, 60 + v * 2)
-    return 40
+        # xác suất chiếm: ramp mượt từ nền tối → tường sáng
+        t = v / 100.0
+        base = 11 + int(t * (250 - 11))
+        return min(255, max(11, base))
+    return 38
+
+
+def _opt_map_upscale_factor(cols: int, rows: int) -> int:
+    """Integer nearest-neighbor scale sao cho không vượt max cạnh / max pixel (payload hợp lý)."""
+    max_side = max(512, RTAB_MAP_OPT_MAP_MAX_SIDE)
+    max_px = max(500_000, RTAB_MAP_OPT_MAP_MAX_PIXELS)
+    best = 1
+    for s in range(2, 12):
+        nw, nh = cols * s, rows * s
+        if nw * nh > max_px or max(nw, nh) > max_side:
+            break
+        best = s
+    return best
+
+
+def _nearest_upscale_grey8(grey: bytes, cw: int, ch: int, scale: int) -> Tuple[int, int, bytes]:
+    if scale <= 1 or len(grey) != cw * ch:
+        return cw, ch, grey
+    nw, nh = cw * scale, ch * scale
+    out = bytearray(nw * nh)
+    for y in range(ch):
+        y0 = y * scale
+        src_row = y * cw
+        for x in range(cw):
+            v = grey[src_row + x]
+            x0 = x * scale
+            for dy in range(scale):
+                row_off = (y0 + dy) * nw + x0
+                for dx in range(scale):
+                    out[row_off + dx] = v
+    return nw, nh, bytes(out)
 
 
 def _grey_dilate_max(grey: bytes, cw: int, ch: int, neighbor_sub: int = 8) -> bytes:
@@ -221,8 +260,11 @@ def _try_load_admin_opt_map_surface(
             iy = r
         for c in range(n_cols):
             grey[iy * n_cols + c] = _occ_byte_to_grey(raw[base + c])
-    grey_b = _grey_dilate_max(bytes(grey), n_cols, n_rows)
-    return n_cols, n_rows, grey_b, bmap
+    # Không dilate: giữ biên ô occupancy sắc như Graph View; upscale sau để zoom web mịn.
+    grey_b = bytes(grey)
+    sc = _opt_map_upscale_factor(n_cols, n_rows)
+    nw, nh, grey_b = _nearest_upscale_grey8(grey_b, n_cols, n_rows, sc)
+    return nw, nh, grey_b, bmap
 
 
 def _world_xy_from_pose_and_local(f12: Tuple[float, ...], lx: float, ly: float) -> Tuple[float, float]:
@@ -323,14 +365,14 @@ def _png_chunk(tag: bytes, data: bytes) -> bytes:
     return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
 
 
-def _png_grey8(width: int, height: int, grey: bytes) -> bytes:
+def _png_grey8(width: int, height: int, grey: bytes, compress_level: int = 6) -> bytes:
     if len(grey) != width * height:
         raise ValueError("raster size mismatch")
     buf = bytearray()
     for y in range(height):
         buf.append(0)
         buf.extend(grey[y * width : (y + 1) * width])
-    z = zlib.compress(bytes(buf), 6)
+    z = zlib.compress(bytes(buf), max(1, min(9, int(compress_level))))
     ihdr = struct.pack(">2I5B", width, height, 8, 0, 0, 0, 0)
     return (
         b"\x89PNG\r\n\x1a\n"
@@ -570,7 +612,7 @@ def build_rtab_graph_json(
             if use_admin_raster and opt_surface:
                 try:
                     cw_r, ch_r, grey, _ob = opt_surface
-                    png_bytes = _png_grey8(cw_r, ch_r, grey)
+                    png_bytes = _png_grey8(cw_r, ch_r, grey, compress_level=9)
                     env_raster_w = cw_r
                     env_raster_h = ch_r
                     env_raster_png_b64 = base64.standard_b64encode(png_bytes).decode("ascii")

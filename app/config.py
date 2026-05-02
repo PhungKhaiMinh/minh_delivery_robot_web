@@ -192,6 +192,9 @@ RTAB_MAP_DB_MAX_BYTES = int(os.getenv("RTAB_MAP_DB_MAX_BYTES", str(260 * 1024 * 
 RTAB_MAP_ENV_MAX_POINTS = int(os.getenv("RTAB_MAP_ENV_MAX_POINTS", "180000"))
 # Cạnh dài nhất (px) của PNG môi trường — tăng để gần độ mịn Graph View của RTAB-Map
 RTAB_MAP_ENV_RASTER_MAX_SIDE = int(os.getenv("RTAB_MAP_ENV_RASTER_MAX_SIDE", "2400"))
+# Admin.opt_map: upscale nearest-neighbor (cùng mét / pixel gốc) để zoom web sắc như Graph View
+RTAB_MAP_OPT_MAP_MAX_SIDE = int(os.getenv("RTAB_MAP_OPT_MAP_MAX_SIDE", "4096"))
+RTAB_MAP_OPT_MAP_MAX_PIXELS = int(os.getenv("RTAB_MAP_OPT_MAP_MAX_PIXELS", str(6_000_000)))
 
 # === MQTT topic gửi waypoints cho robot di chuyển ===
 MQTT_TOPIC_PATH = os.getenv("MQTT_TOPIC_PATH", "UGV/path_topic")
