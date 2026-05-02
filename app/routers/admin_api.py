@@ -2,7 +2,7 @@
 API JSON cho Admin Dashboard (yêu cầu role admin).
 """
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.config import (
@@ -84,10 +84,13 @@ async def admin_mqtt_config(request: Request):
 
 
 @router.get("/rtab-map/graph")
-async def admin_rtab_map_graph(request: Request):
-    """Graph RTAB-Map (Node pose + Link neighbor) cho bản đồ CRS.Simple trên Admin Tracking."""
+async def admin_rtab_map_graph(
+    request: Request,
+    env: int = Query(1, description="1 = gồm điểm scan/obstacle (môi trường), 0 = chỉ graph"),
+):
+    """Graph RTAB-Map (Node pose + Link neighbor; tùy chọn điểm laser/obstacle từ Data) cho Admin Tracking."""
     require_admin(request)
-    return JSONResponse(content=build_rtab_graph_json())
+    return JSONResponse(content=build_rtab_graph_json(include_environment=(env != 0)))
 
 
 @router.get("/rtab-map/status")

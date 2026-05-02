@@ -15,15 +15,16 @@
     "topicPose": mqtt_topic_pose,
     "mqttUser": mqtt_username,
     "mqttPass": mqtt_password,
-    "graphUrl": "/api/admin/rtab-map/graph",
+    "graphUrl": "/api/admin/rtab-map/graph?env=1",
     "rtabDbLabel": rtab_map_db_path,
 } %}
 <div class="max-w-7xl mx-auto space-y-6" x-data='adminTracking({{ tracking_cfg|tojson }})'>
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Tracking</h1>
         <p class="text-sm text-slate-500 mt-1">
-            Bản đồ lấy từ graph RTAB-Map trong file <code class="text-xs bg-slate-200 px-1 rounded" x-text="dbLabel"></code>
-            (Node pose + liên kết láng giềng). Trang tự tải graph khi mở — không cần chọn file; dữ liệu nằm trên <strong>server</strong> nên mọi máy (cùng URL, cùng admin) đều thấy cùng map.
+            Bản đồ lấy từ file RTAB-Map <code class="text-xs bg-slate-200 px-1 rounded" x-text="dbLabel"></code>:
+            graph (node pose + láng giềng) và mẫu điểm môi trường từ <code class="text-xs">scan</code> / <code class="text-xs">obstacle_cells</code> (đám mây 2D trong khung world).
+            The map loads from the server — same URL, same admins see the same data.
             Nếu chưa có map trên server: vào <a href="/admin/settings" class="text-sky-700 font-medium hover:underline">Settings</a> để tải <code class="text-xs bg-slate-200 px-1 rounded">.db</code> một lần (Railway: Volume + <code class="text-xs bg-slate-200 px-1 rounded">RTAB_MAP_DB_PATH</code>).
             Hệ trục hiển thị trùng với tọa độ local <strong>x, y</strong> (mét) từ
             <code class="text-xs bg-slate-200 px-1 rounded" x-text="topicPoseLabel"></code> — kéo / thu phó để tương tác.
@@ -120,7 +121,7 @@
     function adminTracking(cfg) {
         cfg = cfg || {};
         var topicPose = cfg.topicPose || 'UGV/localization/pose';
-        var graphUrl = cfg.graphUrl || '/api/admin/rtab-map/graph';
+        var graphUrl = cfg.graphUrl || '/api/admin/rtab-map/graph?env=1';
 
         var map = null;
         var graphBounds = null;
@@ -179,9 +180,11 @@
                 var b = graphBounds;
                 var h = b.ymax - b.ymin;
                 var w = b.xmax - b.xmin;
+                var envN = (graph.env_points && graph.env_points.length) ? graph.env_points.length : 0;
                 self.graphMeta = 'Nguồn: ' + (graph.source || 'RTAB-Map') + ' — ' +
                     (graph.nodes ? graph.nodes.length : 0) + ' node, ' +
-                    (graph.links ? graph.links.length : 0) + ' cạnh láng giềng';
+                    (graph.links ? graph.links.length : 0) + ' cạnh láng giềng' +
+                    (envN ? (', ' + envN + ' điểm môi trường (subsample)') : '');
 
                 map = L.map('admin-map', {
                     crs: L.CRS.Simple,
@@ -191,7 +194,7 @@
                     attributionControl: true,
                 });
                 map.attributionControl.setPrefix('');
-                map.attributionControl.addAttribution('RTAB-Map graph (local meters)');
+                map.attributionControl.addAttribution('RTAB-Map — graph + env samples (m)');
 
                 canvasRenderer = L.canvas({ padding: 0.5 });
 
@@ -228,6 +231,24 @@
                         '<b>Node ' + n.id + '</b><br>x: ' + Number(n.x).toFixed(3) + ' m<br>y: ' + Number(n.y).toFixed(3) + ' m'
                     );
                 });
+
+                var envPts = graph.env_points || [];
+                var envStride = 1;
+                if (envPts.length > 18000) envStride = 2;
+                if (envPts.length > 36000) envStride = 3;
+                for (var ei = 0; ei < envPts.length; ei += envStride) {
+                    var q = envPts[ei];
+                    if (!q || q.length < 2) continue;
+                    L.circleMarker(worldToMapLatLng(Number(q[0]), Number(q[1]), b), {
+                        renderer: canvasRenderer,
+                        radius: 1.1,
+                        fillColor: '#94a3b8',
+                        color: '#94a3b8',
+                        weight: 0,
+                        fillOpacity: 0.35,
+                        interactive: false,
+                    }).addTo(map);
+                }
 
                 map.fitBounds(L.latLngBounds(L.latLng(h, 0), L.latLng(0, w)));
                 trailLine = L.polyline([], {
