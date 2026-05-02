@@ -12,6 +12,7 @@
     "topicParaCan": "UGV/para/can",
     "losSaved": los_saved,
     "canSaved": can_saved,
+    "rtabMapDbPath": rtab_map_db_path,
 } %}
 <div class="max-w-4xl mx-auto space-y-8" x-data='adminSettings({{ settings_cfg|tojson }})'>
     <div>
@@ -35,6 +36,43 @@
         <span class="text-xs text-slate-500">Vel: <code class="bg-slate-200 px-1 rounded" x-text="topicVel"></code></span>
     </div>
     <p class="text-xs text-red-600 min-h-[1rem]" x-show="publishError" x-text="publishError"></p>
+
+    <!-- Bản đồ RTAB (Tracking) — tải một lần, server đọc lại mỗi lần mở trang Tracking -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-4">
+        <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span>
+            Bản đồ RTAB-Map (Admin Tracking)
+        </p>
+        <p class="text-xs text-slate-500">
+            Trang <strong>Tracking</strong> tự tải graph từ file trên server — <strong>không cần chọn map mỗi lần</strong>.
+            Mọi máy / mọi trình duyệt đăng nhập admin vào <strong>cùng một website</strong> đều thấy cùng một map (file nằm trên server, không lưu trong máy từng PC).
+            Trên Railway: thêm <strong>Volume</strong> (vd. mount <code class="bg-slate-100 px-1 rounded">/data</code>) và biến môi trường
+            <code class="bg-slate-100 px-1 rounded">RTAB_MAP_DB_PATH=/data/A5_night.db</code>, rồi tải file <code class="bg-slate-100 px-1 rounded">.db</code> một lần tại đây.
+            Không commit file &gt;100MB lên GitHub.
+        </p>
+        <dl class="text-xs space-y-1 font-mono text-slate-700 bg-slate-50 rounded-xl p-3 border border-slate-100">
+            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Đường dẫn server</dt><dd class="break-all" x-text="rtabPath || rtabMapDbPath"></dd></div>
+            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Có file</dt><dd><span x-text="rtabExists ? 'Có' : 'Chưa'"></span> · <span x-text="rtabBytesLabel"></span> · RTAB hợp lệ: <span x-text="rtabValid ? 'Có' : '—'"></span></dd></div>
+        </dl>
+        <div class="flex flex-wrap items-end gap-3">
+            <label class="block min-w-[12rem] flex-1">
+                <span class="text-xs font-medium text-slate-600">Chọn file RTAB-Map (.db)</span>
+                <input type="file" accept=".db,.sqlite,application/octet-stream" x-ref="rtabFile"
+                    class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-violet-100 file:text-violet-800 hover:file:bg-violet-200" />
+            </label>
+            <button type="button" @click="uploadRtabMap()"
+                :disabled="rtabUploading"
+                class="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 shrink-0">
+                <span x-show="!rtabUploading">Tải lên &amp; lưu</span>
+                <span x-show="rtabUploading">Đang tải…</span>
+            </button>
+            <button type="button" @click="refreshRtabStatus()" class="px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 shrink-0">
+                Làm mới trạng thái
+            </button>
+        </div>
+        <p class="text-xs text-emerald-700 font-medium min-h-[1rem]" x-show="rtabMsg" x-text="rtabMsg"></p>
+        <p class="text-xs text-red-600 min-h-[1rem]" x-show="rtabErr" x-text="rtabErr"></p>
+    </div>
 
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-6">
         <div>
@@ -296,6 +334,7 @@ function adminSettings(cfg) {
     var topicParaCan = cfg.topicParaCan || 'UGV/para/can';
     var losSaved = cfg.losSaved;
     var canSaved = cfg.canSaved;
+    var rtabMapDbPath = cfg.rtabMapDbPath || '';
 
     function buildParaPayload(obj) {
         var out = {};
@@ -362,6 +401,62 @@ function adminSettings(cfg) {
         lastOk: '',
         publishing: false,
         _client: null,
+        rtabMapDbPath: rtabMapDbPath,
+        rtabPath: '',
+        rtabExists: false,
+        rtabBytesLabel: '—',
+        rtabValid: false,
+        rtabUploading: false,
+        rtabMsg: '',
+        rtabErr: '',
+
+        async refreshRtabStatus() {
+            var self = this;
+            try {
+                var res = await fetch('/api/admin/rtab-map/status', { credentials: 'same-origin' });
+                var d = await res.json().catch(function () { return null; });
+                if (!d) return;
+                self.rtabPath = d.path || '';
+                self.rtabExists = !!d.exists;
+                var b = Number(d.bytes) || 0;
+                if (!d.exists) self.rtabBytesLabel = '—';
+                else if (b >= 1048576) self.rtabBytesLabel = (b / 1048576).toFixed(1) + ' MB';
+                else self.rtabBytesLabel = (b / 1024).toFixed(1) + ' KB';
+                self.rtabValid = !!d.valid_rtab;
+            } catch (e) { /* ignore */ }
+        },
+
+        async uploadRtabMap() {
+            var self = this;
+            var inp = this.$refs.rtabFile;
+            self.rtabErr = '';
+            self.rtabMsg = '';
+            if (!inp || !inp.files || !inp.files[0]) {
+                self.rtabErr = 'Hãy chọn file .db';
+                return;
+            }
+            var fd = new FormData();
+            fd.append('file', inp.files[0]);
+            self.rtabUploading = true;
+            try {
+                var res = await fetch('/api/admin/rtab-map/upload', { method: 'POST', credentials: 'same-origin', body: fd });
+                var data = await res.json().catch(function () { return {}; });
+                if (!res.ok) {
+                    var det = data.detail;
+                    if (typeof det === 'string') self.rtabErr = det;
+                    else if (Array.isArray(det) && det[0] && det[0].msg) self.rtabErr = det[0].msg;
+                    else self.rtabErr = data.message || ('HTTP ' + res.status);
+                    return;
+                }
+                self.rtabMsg = data.message || 'Đã lưu.';
+                await self.refreshRtabStatus();
+                inp.value = '';
+            } catch (e) {
+                self.rtabErr = e.message || String(e);
+            } finally {
+                self.rtabUploading = false;
+            }
+        },
 
         _maxControlSpeed() {
             var v = Number(this.controlMaxSpeed);
@@ -453,6 +548,7 @@ function adminSettings(cfg) {
             self._onArrowKeyUp = function (e) { self._handleArrowKeyUp(e); };
             window.addEventListener('keydown', self._onArrowKeyDown, true);
             window.addEventListener('keyup', self._onArrowKeyUp, true);
+            self.refreshRtabStatus();
         },
 
         _resolveActiveArrowDir() {

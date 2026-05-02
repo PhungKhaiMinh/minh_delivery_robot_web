@@ -2,7 +2,7 @@
 API JSON cho Admin Dashboard (yêu cầu role admin).
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.config import (
@@ -44,7 +44,11 @@ from app.services.pickup_locations_store import (
 )
 from app.services.robot_waypoints_dataset_store import get_waypoints_dataset, set_waypoints_dataset
 from app.services.admin_route_planner import plan_field_route
-from app.services.rtab_map_graph_service import build_rtab_graph_json
+from app.services.rtab_map_graph_service import (
+    build_rtab_graph_json,
+    get_rtab_map_status,
+    save_rtab_map_from_upload,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["Admin API"])
 
@@ -84,6 +88,35 @@ async def admin_rtab_map_graph(request: Request):
     """Graph RTAB-Map (Node pose + Link neighbor) cho bản đồ CRS.Simple trên Admin Tracking."""
     require_admin(request)
     return JSONResponse(content=build_rtab_graph_json())
+
+
+@router.get("/rtab-map/status")
+async def admin_rtab_map_status(request: Request):
+    """Trạng thái file map trên disk (path, kích thước, hợp lệ RTAB)."""
+    require_admin(request)
+    return JSONResponse(content=get_rtab_map_status())
+
+
+@router.post("/rtab-map/upload")
+async def admin_rtab_map_upload(request: Request, file: UploadFile = File(...)):
+    """Tải lên file .db RTAB-Map, ghi đè ``RTAB_MAP_DB_PATH`` (một lần, dùng lại mỗi lần mở Tracking)."""
+    require_admin(request)
+    name = (file.filename or "").strip().lower()
+    if not name.endswith(".db"):
+        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file .db")
+    try:
+        ok, msg = await save_rtab_map_from_upload(file)
+        if not ok:
+            raise HTTPException(status_code=400, detail=msg)
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": msg,
+                "status": get_rtab_map_status(),
+            }
+        )
+    finally:
+        await file.close()
 
 
 @router.get("/bookings/active")

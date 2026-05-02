@@ -166,6 +166,7 @@ async def admin_settings(request: Request):
         "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
         "los_saved": get_los_last_params(),
         "can_saved": get_can_last_params(),
+        "rtab_map_db_path": RTAB_MAP_DB_PATH,
         **_mqtt_ctx(),
     }
     return templates.TemplateResponse(request, "admin/settings.html", ctx)

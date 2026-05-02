@@ -23,7 +23,9 @@
         <h1 class="text-2xl font-bold text-slate-900">Tracking</h1>
         <p class="text-sm text-slate-500 mt-1">
             Bản đồ lấy từ graph RTAB-Map trong file <code class="text-xs bg-slate-200 px-1 rounded" x-text="dbLabel"></code>
-            (Node pose + liên kết láng giềng). Hệ trục hiển thị trùng với tọa độ local <strong>x, y</strong> (mét) từ
+            (Node pose + liên kết láng giềng). Trang tự tải graph khi mở — không cần chọn file; dữ liệu nằm trên <strong>server</strong> nên mọi máy (cùng URL, cùng admin) đều thấy cùng map.
+            Nếu chưa có map trên server: vào <a href="/admin/settings" class="text-sky-700 font-medium hover:underline">Settings</a> để tải <code class="text-xs bg-slate-200 px-1 rounded">.db</code> một lần (Railway: Volume + <code class="text-xs bg-slate-200 px-1 rounded">RTAB_MAP_DB_PATH</code>).
+            Hệ trục hiển thị trùng với tọa độ local <strong>x, y</strong> (mét) từ
             <code class="text-xs bg-slate-200 px-1 rounded" x-text="topicPoseLabel"></code> — kéo / thu phó để tương tác.
         </p>
     </div>
