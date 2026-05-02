@@ -313,215 +313,110 @@
     </div>
 </div>
 
-<!-- ═══════════════ TEST SCENARIOS ═══════════════ -->
-{% set orders_test_cfg = {
+
+{% set wpds_cfg = {
     "wsUrl": mqtt_ws_url,
     "clientPrefix": mqtt_client_prefix,
     "mqttUser": mqtt_username,
     "mqttPass": mqtt_password,
     "topicPose": robot_status_ugv_topics.pose,
 } %}
-<div class="max-w-7xl mx-auto mt-10 space-y-4" x-data='testScenarios({{ orders_test_cfg|tojson }})'>
-    <div class="flex items-center gap-3">
-        <h2 class="text-xl font-bold text-slate-900">Kịch bản kiểm tra thực địa</h2>
-        <span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold uppercase tracking-wide">Test</span>
+<textarea id="waypoints-dataset-boot" class="hidden" aria-hidden="true">{{ waypoints_dataset_for_admin|tojson }}</textarea>
+<div class="max-w-7xl mx-auto mt-10 space-y-4" x-data='waypointDatasetEditor({{ wpds_cfg|tojson }})'>
+    <div>
+        <h2 class="text-xl font-bold text-slate-900">Dataset waypoint robot</h2>
+        <p class="text-sm text-slate-500 mt-1">
+            Tạo danh sách điểm tham chiếu nhanh (tên, loại <code class="text-slate-700 bg-slate-100 px-1 rounded">center</code> hoặc
+            <code class="text-slate-700 bg-slate-100 px-1 rounded">right_side</code>, tọa độ x, y mét Bắc/Đông).
+            Nút <strong class="text-teal-700">GPS</strong> gán x, y từ vị trí hiện tại trên <code class="text-slate-700 bg-slate-100 px-1 rounded">UGV/localization/pose</code> (cần MQTT kết nối).
+            Dataset lưu trên Firestore hoặc DB local (cùng <code class="text-slate-700 bg-slate-100 px-1 rounded">admin_config</code>).
+        </p>
     </div>
-    <p class="text-sm text-slate-500">Gửi danh sách waypoints trực tiếp lên MQTT để kiểm tra xe chạy thực tế.</p>
-
-    <!-- Scenario: Football field -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div class="p-5 space-y-4">
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                    <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
-                        <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
-                        Chạy quanh sân bóng đá
-                    </h3>
-                    <p class="text-xs text-slate-500 mt-1">Robot di chuyển qua 4 góc sân bóng trong khuôn viên trường rồi quay về điểm xuất phát. Bảng dưới: (x, y) tính từ server (met, Bắc/Đông) theo kịch bản GPS; khớp lộ trình tới robot.</p>
-                </div>
-                <button type="button"
-                    @click="dispatch('football_field')"
-                    :disabled="running === 'football_field'"
-                    class="shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors"
-                    :class="running === 'football_field'
-                        ? 'bg-slate-200 text-slate-500 cursor-wait'
-                        : 'bg-sky-600 text-white hover:bg-sky-700 active:bg-sky-800'">
-                    <span x-show="running !== 'football_field'">Bắt đầu</span>
-                    <span x-show="running === 'football_field'" class="flex items-center gap-2">
-                        <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                        Đang gửi…
-                    </span>
-                </button>
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div class="rounded-xl border border-teal-100 bg-teal-50/50 p-3 space-y-2">
+            <p class="text-xs font-semibold text-teal-900">Pose robot — <span class="font-mono text-teal-800" x-text="topicPose"></span></p>
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium"
+                    :class="{
+                        'bg-emerald-100 text-emerald-800': poseConn === 'connected',
+                        'bg-amber-100 text-amber-800': poseConn === 'reconnecting',
+                        'bg-slate-200 text-slate-600': poseConn === 'disconnected',
+                        'bg-red-100 text-red-800': poseConn === 'error',
+                    }">
+                    <span class="w-1.5 h-1.5 rounded-full" :class="poseConn === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+                    <span x-text="poseConnLabel"></span>
+                </span>
+                <span class="text-slate-600">x, y:</span>
+                <span class="font-mono text-slate-800 break-all" x-text="poseLiveSummary"></span>
             </div>
-
-            <div class="overflow-x-auto">
-                <table class="min-w-full text-xs font-mono">
-                    <thead class="text-slate-500 bg-slate-50">
-                        <tr>
-                            <th class="px-3 py-2 text-left font-medium">#</th>
-                            <th class="px-3 py-2 text-left font-medium">Tên</th>
-                            <th class="px-3 py-2 text-right font-medium">X (Bắc, m)</th>
-                            <th class="px-3 py-2 text-right font-medium">Y (Đông, m)</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100 text-slate-700">
-                        {% for row in football_scenario_rows %}
-                        <tr class="{% if loop.index == 1 %}bg-sky-50{% elif loop.last %}bg-slate-50 text-slate-400{% endif %}">
-                            <td class="px-3 py-1.5">{{ row.idx }}</td>
-                            <td class="px-3 py-1.5 {% if loop.index == 1 %}font-semibold{% endif %}">{{ row.name }}</td>
-                            <td class="px-3 py-1.5 text-right">{{ "%.4f"|format(row.x) }}</td>
-                            <td class="px-3 py-1.5 text-right">{{ "%.4f"|format(row.y) }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- Result -->
-            <template x-if="lastResult && lastScenario === 'football_field'">
-                <div class="rounded-xl p-4 text-sm"
-                    :class="lastResult.success ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-red-50 border border-red-200 text-red-800'">
-                    <p class="font-semibold" x-text="lastResult.message"></p>
-                    <template x-if="lastResult.payload">
-                        <div class="mt-2 text-xs font-mono bg-white/60 rounded-lg p-3 overflow-x-auto">
-                            <p class="break-all"><span class="text-slate-500">stage_x:</span> [<span x-text="stageJoin(lastResult.payload.stage_x)"></span>]</p>
-                            <p class="break-all"><span class="text-slate-500">stage_y:</span> [<span x-text="stageJoin(lastResult.payload.stage_y)"></span>]</p>
-                        </div>
-                    </template>
-                </div>
-            </template>
+            <p class="text-[11px] text-red-600 min-h-[1rem]" x-show="poseErr" x-text="poseErr"></p>
         </div>
-    </div>
-    <!-- Scenario: Custom waypoints (2+ points, draft persisted) -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div class="p-5 space-y-4">
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                    <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
-                        <span class="w-3 h-3 rounded-full bg-violet-500"></span>
-                        Kịch bản tùy chỉnh
-                    </h3>
-                    <p class="text-xs text-slate-500 mt-1">Nhập từ 2 điểm trở lên. (x, y) là mét, trùng <code class="text-violet-800">stage_x</code> / <code class="text-violet-800">stage_y</code>. Bản nháp lưu trên trình duyệt. Nút <strong>Pose</strong>: lấy trực tiếp x, y từ <code class="text-violet-800">UGV/localization/pose</code>. Có thể gán nhanh từ <strong>địa điểm nhận sách</strong> (bảng phía trên) vào một điểm lộ trình.</p>
-                </div>
-                <button type="button"
-                    @click="dispatchCustom()"
-                    :disabled="running === 'custom'"
-                    class="shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors"
-                    :class="running === 'custom'
-                        ? 'bg-slate-200 text-slate-500 cursor-wait'
-                        : 'bg-violet-600 text-white hover:bg-violet-700 active:bg-violet-800'">
-                    <span x-show="running !== 'custom'">Bắt đầu</span>
-                    <span x-show="running === 'custom'" class="flex items-center gap-2">
-                        <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                        Đang gửi…
-                    </span>
-                </button>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-2">
-                <button type="button" @click="addWaypointRow()"
-                    class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-100 text-violet-800 hover:bg-violet-200">
-                    + Thêm điểm
-                </button>
-                <span class="text-xs text-slate-400">Tối đa 20 điểm</span>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-2 p-3 rounded-xl border border-violet-100 bg-white">
-                <span class="text-xs font-semibold text-slate-700 shrink-0">Điểm đến từ địa điểm nhận sách</span>
-                <select x-model="pickupInjectLocId"
-                    class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white min-w-[10rem]">
-                    <option value="">— Chọn địa điểm —</option>
-                    <template x-for="loc in pickupLocations" :key="loc.id">
-                        <option :value="loc.id" x-text="loc.name + (loc.overridden ? ' *' : '')"></option>
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead class="text-xs text-slate-500 bg-slate-50 border-b border-slate-200">
+                    <tr>
+                        <th class="px-3 py-2 text-left font-medium">ID</th>
+                        <th class="px-3 py-2 text-left font-medium">Tên</th>
+                        <th class="px-3 py-2 text-left font-medium">Loại</th>
+                        <th class="px-3 py-2 text-right font-medium">X (m)</th>
+                        <th class="px-3 py-2 text-right font-medium">Y (m)</th>
+                        <th class="px-3 py-2 text-left font-medium w-36"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    <template x-for="(r, i) in items" :key="r._k">
+                        <tr>
+                            <td class="px-3 py-2 align-top">
+                                <template x-if="r._isNew">
+                                    <input type="text" x-model="r.idStr" spellcheck="false" placeholder="vd: wp_a1"
+                                        class="w-full min-w-[6rem] max-w-[10rem] px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-teal-500" />
+                                </template>
+                                <template x-if="!r._isNew">
+                                    <span class="font-mono text-xs text-slate-700" x-text="r.id"></span>
+                                </template>
+                            </td>
+                            <td class="px-3 py-2">
+                                <input type="text" x-model="r.nameStr" spellcheck="false" placeholder="Tên waypoint"
+                                    class="w-full min-w-[7rem] max-w-[14rem] px-2 py-1.5 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-teal-500" />
+                            </td>
+                            <td class="px-3 py-2">
+                                <select x-model="r.kind"
+                                    class="w-full min-w-[8rem] max-w-[11rem] px-2 py-1.5 rounded-lg border border-slate-200 text-xs bg-white focus:ring-2 focus:ring-teal-500">
+                                    <option value="center">center</option>
+                                    <option value="right_side">right_side</option>
+                                </select>
+                            </td>
+                            <td class="px-3 py-2">
+                                <input type="text" inputmode="decimal" x-model="r.xStr" spellcheck="false" placeholder="X"
+                                    class="w-full min-w-[5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-teal-500" />
+                            </td>
+                            <td class="px-3 py-2">
+                                <input type="text" inputmode="decimal" x-model="r.yStr" spellcheck="false" placeholder="Y"
+                                    class="w-full min-w-[5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-teal-500" />
+                            </td>
+                            <td class="px-3 py-2 align-top whitespace-nowrap space-y-1">
+                                <button type="button" @click="applyGpsToRow(i)"
+                                    class="block w-full text-left text-xs font-semibold text-teal-700 hover:underline">GPS</button>
+                                <button type="button" @click="removeRow(i)"
+                                    class="block w-full text-left text-xs font-semibold text-red-600 hover:underline">Xóa</button>
+                            </td>
+                        </tr>
                     </template>
-                </select>
-                <span class="text-xs text-slate-500">→</span>
-                <select x-model.number="pickupInjectRowIdx"
-                    class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white min-w-[7rem]">
-                    <template x-for="(pt, idx) in customPoints" :key="pt._k">
-                        <option :value="idx" x-text="'Điểm ' + (idx + 1)"></option>
-                    </template>
-                </select>
-                <button type="button" @click="injectPickupWaypoint()"
-                    class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-700 text-white hover:bg-violet-800 shrink-0">
-                    Gán x, y vào điểm
-                </button>
-            </div>
-            <p class="text-[11px] text-slate-500 -mt-2"><span class="text-amber-700 font-medium">*</span> = đã chỉnh x,y ở bảng địa điểm nhận sách (không chỉ GPS).</p>
-            <p class="text-[11px] text-red-600 min-h-[1rem]" x-show="pickupInjectMsg" x-text="pickupInjectMsg"></p>
-
-            <div class="rounded-xl border border-violet-200 bg-violet-50/60 p-3 space-y-2">
-                <p class="text-xs font-semibold text-violet-900">Pose mới nhất — <span class="font-mono text-violet-800">UGV/localization/pose</span></p>
-                <div class="flex flex-wrap items-center gap-2 text-xs">
-                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium"
-                        :class="{
-                            'bg-emerald-100 text-emerald-800': poseConn === 'connected',
-                            'bg-amber-100 text-amber-800': poseConn === 'reconnecting',
-                            'bg-slate-200 text-slate-600': poseConn === 'disconnected',
-                            'bg-red-100 text-red-800': poseConn === 'error',
-                        }">
-                        <span class="w-1.5 h-1.5 rounded-full" :class="poseConn === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
-                        <span x-text="poseConnLabel"></span>
-                    </span>
-                    <span class="text-slate-600">x, y, yaw:</span>
-                    <span class="font-mono text-slate-800 break-all" x-text="poseLiveSummary"></span>
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                    <label class="text-xs text-slate-600 shrink-0">Gán vào</label>
-                    <select x-model.number="poseTargetIndex"
-                        class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white min-w-[7rem]">
-                        <template x-for="(pt, idx) in customPoints" :key="pt._k">
-                            <option :value="idx" x-text="'Điểm ' + (idx + 1)"></option>
-                        </template>
-                    </select>
-                    <button type="button" @click="applyPoseToTarget()"
-                        class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-600 text-white hover:bg-violet-700">
-                        Gán pose vào điểm đã chọn
-                    </button>
-                </div>
-                <p class="text-[11px] text-slate-500">Dùng nút <strong class="text-violet-700">Pose</strong> cạnh từng dòng để gán cùng nguồn dữ liệu.</p>
-                <p class="text-[11px] text-red-600" x-show="poseErr" x-text="poseErr"></p>
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <template x-for="(pt, idx) in customPoints" :key="pt._k">
-                    <div class="flex items-center gap-2 bg-slate-50 rounded-xl p-3">
-                        <span class="text-xs font-bold text-slate-500 w-5 shrink-0" x-text="idx + 1"></span>
-                        <div class="flex-1 grid grid-cols-2 gap-2">
-                            <input type="text" inputmode="decimal" x-model="pt.x" @input="saveDraft()"
-                                class="w-full min-w-[10rem] max-w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
-                                placeholder="X (Bắc, m)" autocomplete="off" spellcheck="false" />
-                            <input type="text" inputmode="decimal" x-model="pt.y" @input="saveDraft()"
-                                class="w-full min-w-[10rem] max-w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
-                                placeholder="Y (Đông, m)" autocomplete="off" spellcheck="false" />
-                        </div>
-                        <button type="button" @click="applyPoseToRow(idx)"
-                            class="shrink-0 p-1.5 rounded-lg text-violet-600 hover:bg-violet-100 border border-transparent hover:border-violet-200"
-                            title="Gán x, y từ UGV/localization/pose vào dòng này">
-                            <span class="text-[10px] font-bold leading-none">Pose</span>
-                        </button>
-                        <button type="button" x-show="customPoints.length > 2" @click="removeWaypointRow(idx)"
-                            class="shrink-0 p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
-                            title="Xóa điểm này">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                        </button>
-                    </div>
-                </template>
-            </div>
-
-            <!-- Result -->
-            <template x-if="lastResult && lastScenario === 'custom'">
-                <div class="rounded-xl p-4 text-sm"
-                    :class="lastResult.success ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-red-50 border border-red-200 text-red-800'">
-                    <p class="font-semibold" x-text="lastResult.message"></p>
-                    <template x-if="lastResult.payload">
-                        <div class="mt-2 text-xs font-mono bg-white/60 rounded-lg p-3 overflow-x-auto">
-                            <p class="break-all"><span class="text-slate-500">stage_x:</span> [<span x-text="stageJoin(lastResult.payload.stage_x)"></span>]</p>
-                            <p class="break-all"><span class="text-slate-500">stage_y:</span> [<span x-text="stageJoin(lastResult.payload.stage_y)"></span>]</p>
-                        </div>
-                    </template>
-                </div>
-            </template>
+                </tbody>
+            </table>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+            <button type="button" @click="addRow()"
+                class="px-4 py-2 rounded-xl text-sm font-semibold border border-slate-300 bg-white text-slate-800 hover:bg-slate-50">
+                + Tạo waypoint mới
+            </button>
+            <button type="button" @click="save()" :disabled="saving"
+                class="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-teal-700 hover:bg-teal-800 disabled:opacity-50">
+                <span x-show="!saving">Lưu dataset</span>
+                <span x-show="saving">Đang lưu…</span>
+            </button>
+            <span class="text-xs text-emerald-700 font-medium" x-show="saveMsg" x-text="saveMsg"></span>
+            <span class="text-xs text-red-600" x-show="saveErr" x-text="saveErr"></span>
         </div>
     </div>
 </div>
@@ -965,14 +860,57 @@ window._doDeleteOrder = async function (id) {
 </script>
 <script>
 (function () {
-    var CUSTOM_DRAFT_LS = 'admin_orders_custom_waypoints_draft';
-    var _wpId = 0;
+    var _wdk = 0;
+    function nextKey() {
+        _wdk += 1;
+        return 'wdk_' + _wdk;
+    }
 
-    function newWaypointRow(x, y) {
-        _wpId += 1;
-        var sX = x != null && String(x).trim() !== '' ? String(x).trim() : '';
-        var sY = y != null && String(y).trim() !== '' ? String(y).trim() : '';
-        return { x: sX, y: sY, _k: 'wp' + _wpId };
+    function genWpId() {
+        var hex = '';
+        try {
+            var a = new Uint8Array(4);
+            crypto.getRandomValues(a);
+            hex = Array.from(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+        } catch (e) {
+            hex = String(Date.now());
+        }
+        return 'wp_' + hex;
+    }
+
+    function readWaypointsBoot() {
+        try {
+            var el = document.getElementById('waypoints-dataset-boot');
+            if (el && el.value) return JSON.parse(el.value);
+        } catch (e) { /* ignore */ }
+        return [];
+    }
+
+    function mapServerRow(w) {
+        return {
+            _k: nextKey(),
+            id: w.id,
+            idStr: String(w.id),
+            nameStr: w.name != null ? String(w.name) : '',
+            kind: (w.kind === 'right_side' ? 'right_side' : 'center'),
+            xStr: w.x != null ? String(Number(w.x).toFixed(4)) : '',
+            yStr: w.y != null ? String(Number(w.y).toFixed(4)) : '',
+            _isNew: false,
+        };
+    }
+
+    function newDraftRow() {
+        var nid = genWpId();
+        return {
+            _k: nextKey(),
+            id: nid,
+            idStr: nid,
+            nameStr: '',
+            kind: 'center',
+            xStr: '',
+            yStr: '',
+            _isNew: true,
+        };
     }
 
     function pickNumGps() {
@@ -983,139 +921,34 @@ window._doDeleteOrder = async function (id) {
         return null;
     }
 
-    function readPickupLocationsBoot() {
-        try {
-            var el = document.getElementById('pickup-locations-boot');
-            if (el && el.value) return JSON.parse(el.value);
-        } catch (e) { /* ignore */ }
-        return [];
-    }
-
-    function testScenarios(cfg) {
+    function waypointDatasetEditor(cfg) {
         cfg = cfg || {};
         var topicPose = cfg.topicPose || 'UGV/localization/pose';
         var wsUrl = cfg.wsUrl || '';
         var clientPrefix = cfg.clientPrefix || '';
 
         return {
-            running: null,
-            lastScenario: null,
-            lastResult: null,
-            customPoints: [],
+            items: [],
+            topicPose: topicPose,
             poseConn: 'disconnected',
             poseConnLabel: 'Chưa kết nối',
             poseErr: '',
             poseLiveX: null,
             poseLiveY: null,
-            poseLiveYaw: null,
-            poseTargetIndex: 0,
+            saving: false,
+            saveMsg: '',
+            saveErr: '',
             _poseClient: null,
-            pickupLocations: [],
-            pickupInjectLocId: '',
-            pickupInjectRowIdx: 0,
-            pickupInjectMsg: '',
 
             get poseLiveSummary() {
                 if (this.poseLiveX == null || this.poseLiveY == null) return '—';
-                var xs = this.poseLiveX.toFixed(4);
-                var ys = this.poseLiveY.toFixed(4);
-                var yw = this.poseLiveYaw != null ? (', yaw ' + this.poseLiveYaw.toFixed(4) + ' rad') : '';
-                return xs + ', ' + ys + yw;
-            },
-
-            stageJoin(arr) {
-                if (!arr || !arr.length) return '';
-                var fn = window.formatCoordDisplay;
-                return arr.map(function (n) {
-                    return typeof fn === 'function' ? fn(n) : String(n);
-                }).join(', ');
-            },
-
-            applyPoseToRow(idx) {
-                this.poseErr = '';
-                if (this.poseLiveX == null || this.poseLiveY == null) {
-                    window.alert('Chưa nhận được pose từ UGV/localization/pose (chờ robot / MQTT).');
-                    return;
-                }
-                if (idx < 0 || idx >= this.customPoints.length) return;
-                this.customPoints[idx].x = this.poseLiveX.toFixed(4);
-                this.customPoints[idx].y = this.poseLiveY.toFixed(4);
-                this.saveDraft();
-            },
-
-            applyPoseToTarget() {
-                var i = Number(this.poseTargetIndex);
-                if (Number.isNaN(i)) i = 0;
-                this.applyPoseToRow(i);
-            },
-
-            reloadPickupLocations() {
-                this.pickupLocations = readPickupLocationsBoot();
-            },
-
-            injectPickupWaypoint() {
-                this.pickupInjectMsg = '';
-                var lid = String(this.pickupInjectLocId || '').trim();
-                if (!lid) {
-                    this.pickupInjectMsg = 'Chọn một địa điểm nhận sách.';
-                    return;
-                }
-                var idx = parseInt(this.pickupInjectRowIdx, 10);
-                if (Number.isNaN(idx) || idx < 0 || idx >= this.customPoints.length) {
-                    this.pickupInjectMsg = 'Chọn điểm lộ trình hợp lệ.';
-                    return;
-                }
-                var loc = null;
-                for (var i = 0; i < this.pickupLocations.length; i++) {
-                    if (String(this.pickupLocations[i].id) === lid) {
-                        loc = this.pickupLocations[i];
-                        break;
-                    }
-                }
-                if (!loc) {
-                    this.pickupInjectMsg = 'Không tìm thấy địa điểm (thử làm mới trang).';
-                    return;
-                }
-                var x = Number(loc.x);
-                var y = Number(loc.y);
-                if (!Number.isFinite(x) || !Number.isFinite(y)) {
-                    this.pickupInjectMsg = 'Tọa độ không hợp lệ.';
-                    return;
-                }
-                this.customPoints[idx].x = x.toFixed(4);
-                this.customPoints[idx].y = y.toFixed(4);
-                this.saveDraft();
+                return this.poseLiveX.toFixed(4) + ', ' + this.poseLiveY.toFixed(4);
             },
 
             init() {
                 var self = this;
-                this.pickupLocations = readPickupLocationsBoot();
-                window.addEventListener('admin-pickup-locations-updated', function () {
-                    self.reloadPickupLocations();
-                });
-                var loaded = false;
-                try {
-                    var raw = localStorage.getItem(CUSTOM_DRAFT_LS);
-                    if (raw) {
-                        var o = JSON.parse(raw);
-                        if (o && Array.isArray(o.points) && o.points.length >= 2) {
-                            this.customPoints = o.points.map(function (p) {
-                                var xst = p && String(p.x != null ? p.x : '').trim();
-                                var yst = p && String(p.y != null ? p.y : '').trim();
-                                if (xst && yst) {
-                                    return newWaypointRow(p.x, p.y);
-                                }
-                                return newWaypointRow();
-                            });
-                            loaded = true;
-                        }
-                    }
-                } catch (e) { /* ignore */ }
-                if (!loaded) {
-                    this.customPoints = [
-                        newWaypointRow(), newWaypointRow(), newWaypointRow(), newWaypointRow(),
-                    ];
-                }
+                var boot = readWaypointsBoot();
+                this.items = (Array.isArray(boot) ? boot : []).map(mapServerRow);
 
                 var mqttPass = cfg.mqttPass;
                 this._poseClient = window.AdminMqtt.connect(wsUrl, clientPrefix, function (state, detail) {
@@ -1144,109 +977,103 @@ window._doDeleteOrder = async function (id) {
                         if (!o || typeof o !== 'object') return;
                         var px = pickNumGps(o.x);
                         var py = pickNumGps(o.y);
-                        var pYaw = o.yaw != null ? pickNumGps(o.yaw) : null;
                         if (px != null) self.poseLiveX = px;
                         if (py != null) self.poseLiveY = py;
-                        if (pYaw != null) self.poseLiveYaw = pYaw;
                     });
                 }
-
-                this.saveDraft();
             },
 
-            saveDraft() {
+            addRow() {
+                this.items.push(newDraftRow());
+            },
+
+            removeRow(i) {
+                this.items.splice(i, 1);
+            },
+
+            applyGpsToRow(i) {
+                this.poseErr = '';
+                if (this.poseLiveX == null || this.poseLiveY == null) {
+                    window.alert('Chưa nhận được x, y từ pose (kết nối MQTT và chờ UGV/localization/pose).');
+                    return;
+                }
+                var r = this.items[i];
+                if (!r) return;
+                r.xStr = this.poseLiveX.toFixed(4);
+                r.yStr = this.poseLiveY.toFixed(4);
+            },
+
+            syncBoot(list) {
                 try {
-                    var pts = this.customPoints.map(function (p) {
-                        return { x: p.x, y: p.y };
-                    });
-                    localStorage.setItem(CUSTOM_DRAFT_LS, JSON.stringify({ points: pts }));
+                    var el = document.getElementById('waypoints-dataset-boot');
+                    if (el) el.value = JSON.stringify(list);
                 } catch (e) { /* ignore */ }
             },
 
-            addWaypointRow() {
-                if (this.customPoints.length >= 20) return;
-                this.customPoints.push(newWaypointRow());
-                this.saveDraft();
-            },
-
-            removeWaypointRow(idx) {
-                if (this.customPoints.length <= 2) return;
-                this.customPoints.splice(idx, 1);
-                if (this.poseTargetIndex >= this.customPoints.length) {
-                    this.poseTargetIndex = Math.max(0, this.customPoints.length - 1);
-                }
-                if (this.pickupInjectRowIdx >= this.customPoints.length) {
-                    this.pickupInjectRowIdx = Math.max(0, this.customPoints.length - 1);
-                }
-                this.saveDraft();
-            },
-
-            orderedValidWaypoints() {
+            async save() {
+                this.saveMsg = '';
+                this.saveErr = '';
+                var idRe = /^[a-zA-Z0-9_-]{1,64}$/;
                 var out = [];
-                for (var i = 0; i < this.customPoints.length; i++) {
-                    var p = this.customPoints[i];
-                    var xStr = String(p.x != null ? p.x : '').trim();
-                    var yStr = String(p.y != null ? p.y : '').trim();
-                    if (!xStr || !yStr) continue;
-                    var vx = parseFloat(xStr.replace(',', '.'));
-                    var vy = parseFloat(yStr.replace(',', '.'));
-                    if (isNaN(vx) || isNaN(vy)) continue;
-                    out.push({ x: vx, y: vy });
-                }
-                return out;
-            },
-
-            async dispatch(scenarioId) {
-                this.running = scenarioId;
-                this.lastScenario = scenarioId;
-                this.lastResult = null;
-                try {
-                    var res = await fetch('/api/admin/test-scenario/dispatch', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ scenario_id: scenarioId }),
-                    });
-                    var data = await res.json();
-                    this.lastResult = data;
-                } catch (e) {
-                    this.lastResult = { success: false, message: 'Lỗi mạng: ' + e.message };
-                } finally {
-                    this.running = null;
-                }
-            },
-
-            async dispatchCustom() {
-                var valid = this.orderedValidWaypoints();
-                if (valid.length < 2) {
-                    this.lastScenario = 'custom';
-                    this.lastResult = { success: false, message: 'Cần ít nhất 2 điểm có x và y hợp lệ (theo thứ tự từ trên xuống).' };
-                    return;
-                }
-                this.running = 'custom';
-                this.lastScenario = 'custom';
-                this.lastResult = null;
-                try {
-                    var res = await fetch('/api/admin/test-scenario/dispatch-custom', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ waypoints: valid }),
-                    });
-                    var data = await res.json();
-                    this.lastResult = data;
-                    if (data.success) {
-                        this.saveDraft();
+                var i;
+                for (i = 0; i < this.items.length; i++) {
+                    var r = this.items[i];
+                    var id = r._isNew ? String(r.idStr || '').trim() : String(r.id || '').trim();
+                    var name = String(r.nameStr != null ? r.nameStr : '').trim();
+                    var kind = r.kind === 'right_side' ? 'right_side' : 'center';
+                    if (!idRe.test(id)) {
+                        this.saveErr = 'ID không hợp lệ (dòng ' + (i + 1) + ').';
+                        return;
                     }
+                    if (!name) {
+                        this.saveErr = 'Tên không được trống (dòng ' + (i + 1) + ').';
+                        return;
+                    }
+                    var x = parseFloat(String(r.xStr || '').replace(',', '.'));
+                    var y = parseFloat(String(r.yStr || '').replace(',', '.'));
+                    if (Number.isNaN(x) || Number.isNaN(y)) {
+                        this.saveErr = 'X và Y phải là số (dòng ' + (i + 1) + ').';
+                        return;
+                    }
+                    out.push({ id: id, name: name, kind: kind, x: x, y: y });
+                }
+                var seen = {};
+                for (i = 0; i < out.length; i++) {
+                    if (seen[out[i].id]) {
+                        this.saveErr = 'Trùng ID: ' + out[i].id;
+                        return;
+                    }
+                    seen[out[i].id] = true;
+                }
+                this.saving = true;
+                try {
+                    var res = await fetch('/api/admin/waypoints-dataset', {
+                        method: 'PUT',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ waypoints: out }),
+                    });
+                    var data = await res.json().catch(function () { return null; });
+                    if (!res.ok || !data || !data.success) {
+                        this.saveErr = (data && data.message) || 'Lưu thất bại';
+                        return;
+                    }
+                    var list = data.waypoints || [];
+                    this.items = list.map(mapServerRow);
+                    this.syncBoot(list);
+                    this.saveMsg = 'Đã lưu dataset.';
+                    var self = this;
+                    setTimeout(function () { self.saveMsg = ''; }, 3500);
                 } catch (e) {
-                    this.lastResult = { success: false, message: 'Lỗi mạng: ' + e.message };
+                    this.saveErr = 'Lỗi mạng: ' + e.message;
                 } finally {
-                    this.running = null;
+                    this.saving = false;
                 }
             },
         };
     }
-    window.testScenarios = testScenarios;
+
+    window.waypointDatasetEditor = waypointDatasetEditor;
 })();
 </script>
 {% endblock %}

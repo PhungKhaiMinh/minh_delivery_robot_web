@@ -29,11 +29,11 @@ from app.config import (
     CAMPUS_ORIGIN_LON,
     CAMPUS_ORIGIN_ALT,
 )
-from app.routers.admin_api import get_football_scenario_display_rows
 from app.services.admin_settings_store import get_can_last_params, get_los_last_params
 from app.services.auth_service import get_current_user
 from app.services.booking_service import get_admin_queue_bookings
 from app.services.pickup_locations_store import list_pickup_locations_admin
+from app.services.robot_waypoints_dataset_store import get_waypoints_dataset
 
 templates = Jinja2Templates(directory="app/templates")
 router = APIRouter(prefix="/admin", tags=["Admin Pages"])
@@ -95,8 +95,8 @@ async def admin_orders(request: Request):
         "bookings": bookings,
         "bookings_json": json.dumps(bookings, ensure_ascii=False, default=str),
         "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
-        "football_scenario_rows": get_football_scenario_display_rows(),
         "pickup_locations_for_admin": list_pickup_locations_admin(),
+        "waypoints_dataset_for_admin": get_waypoints_dataset(),
         "robot_status_ugv_topics": ROBOT_STATUS_UGV_TOPICS,
         **_mqtt_ctx(),
     }
