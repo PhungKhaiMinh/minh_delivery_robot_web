@@ -6,6 +6,10 @@ Pose Node: BLOB 12 float (3×4 row-major), translation tại chỉ số 3, 7, 11
 Điểm laser: RTAB-Map lưu ``scan_info`` (>=0.18) gồm format + range + **localTransform** 12 float;
 world = ``node_pose @ localTransform @ (lx, ly, 0)`` — khớp DB Viewer, không chỉ ``node_pose @ (lx,ly)``.
 Link type 0 = kNeighbor (theo RTAB-Map).
+
+Sau tối ưu toàn cục, RTAB-Map lưu trong bảng **Admin**: ``opt_map`` (occupancy 2D đã nén),
+``opt_map_x_min`` / ``opt_map_y_min`` / ``opt_map_resolution``, và ``opt_ids`` + ``opt_poses``
+(poses đã tối ưu — Graph View dùng dữ liệu này).
 """
 
 from __future__ import annotations
@@ -96,6 +100,95 @@ def _world_xy_chain(node12: Tuple[float, ...], local12: Tuple[float, ...], lx: f
     wx = node12[0] * x1 + node12[1] * y1 + node12[2] * z1 + node12[3]
     wy = node12[4] * x1 + node12[5] * y1 + node12[6] * z1 + node12[7]
     return wx, wy
+
+
+def _tx_ty_from_pose12(f12: Tuple[float, ...]) -> Tuple[float, float]:
+    return (float(f12[3]), float(f12[7]))
+
+
+def _load_optimized_poses_by_id(con: sqlite3.Connection) -> Dict[int, Tuple[float, ...]]:
+    """Đọc ``Admin.opt_ids`` + ``opt_poses`` (zlib + cv::Mat) — poses sau Graph Optimizer."""
+    try:
+        row = con.execute("SELECT opt_ids, opt_poses FROM Admin LIMIT 1").fetchone()
+    except sqlite3.Error:
+        return {}
+    if not row or not row[0] or not row[1]:
+        return {}
+    ids_um = _uncompress_rtab_cv_blob(bytes(row[0]))
+    poses_um = _uncompress_rtab_cv_blob(bytes(row[1]))
+    if not ids_um or not poses_um:
+        return {}
+    ir, ic, ityp, iraw = ids_um
+    pr, pc, ptyp, praw = poses_um
+    if _opencv_elem_size(ityp) != 4 or ir * ic * 4 != len(iraw):
+        return {}
+    if _opencv_elem_size(ptyp) != 4 or pr * pc * 4 != len(praw):
+        return {}
+    n_id = ir * ic
+    try:
+        ids = struct.unpack("<" + str(n_id) + "i", iraw)
+        floats = struct.unpack("<" + str(pr * pc) + "f", praw)
+    except struct.error:
+        return {}
+    if len(ids) * 12 != len(floats):
+        return {}
+    out: Dict[int, Tuple[float, ...]] = {}
+    for i, nid in enumerate(ids):
+        b = i * 12
+        out[int(nid)] = tuple(float(x) for x in floats[b : b + 12])
+    return out
+
+
+def _occ_byte_to_grey(v: int) -> int:
+    """Giá trị occupancy RTAB-Map phổ biến: 0 free, 100 obstacle, 255 unknown."""
+    if v == 100:
+        return 248
+    if v == 0:
+        return 0
+    if v == 255:
+        return 0
+    if 40 <= v <= 127:
+        return min(255, 70 + v)
+    return 0
+
+
+def _try_load_admin_opt_map_surface(
+    con: sqlite3.Connection,
+) -> Optional[Tuple[int, int, bytes, Dict[str, float]]]:
+    """
+    ``Admin.opt_map`` — cùng dữ liệu 2D map sau tối ưu như Graph View (DBDriverSqlite3::load2DMapQuery).
+
+    Trả (png_width, png_height, grey8_rowmajor, bounds_xy) hoặc None.
+    """
+    try:
+        row = con.execute(
+            "SELECT opt_map, opt_map_x_min, opt_map_y_min, opt_map_resolution FROM Admin LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row or not row[0]:
+        return None
+    x_min = float(row[1])
+    y_min = float(row[2])
+    res = float(row[3])
+    if res <= 0:
+        return None
+    um = _uncompress_rtab_cv_blob(bytes(row[0]))
+    if not um:
+        return None
+    n_rows, n_cols, typ, raw = um
+    if _opencv_elem_size(typ) != 1 or n_rows < 1 or n_cols < 1 or n_rows * n_cols != len(raw):
+        return None
+    xmax = x_min + n_cols * res
+    ymax = y_min + n_rows * res
+    bmap = {"xmin": x_min, "xmax": xmax, "ymin": y_min, "ymax": ymax}
+    grey = bytearray(n_cols * n_rows)
+    for r in range(n_rows):
+        iy = n_rows - 1 - r
+        base = r * n_cols
+        for c in range(n_cols):
+            grey[iy * n_cols + c] = _occ_byte_to_grey(raw[base + c])
+    return n_cols, n_rows, bytes(grey), bmap
 
 
 def _world_xy_from_pose_and_local(f12: Tuple[float, ...], lx: float, ly: float) -> Tuple[float, float]:
@@ -320,6 +413,8 @@ def build_rtab_graph_json(
             "env_raster_w": 0,
             "env_raster_h": 0,
             "env_raster_png_b64": "",
+            "env_raster_source": "",
+            "opt_map_bounds": None,
         }
 
     con: Optional[sqlite3.Connection] = None
@@ -330,13 +425,19 @@ def build_rtab_graph_json(
         except (sqlite3.Error, ValueError, OSError):
             con = sqlite3.connect(str(path))
 
+        opt_by_id = _load_optimized_poses_by_id(con)
+
         positions: Dict[int, Tuple[float, float]] = {}
         cur = con.execute("SELECT id, pose FROM Node WHERE pose IS NOT NULL")
         for nid, pose in cur:
+            nid = int(nid)
+            if nid in opt_by_id:
+                positions[nid] = _tx_ty_from_pose12(opt_by_id[nid])
+                continue
             pt = _pose_tx_ty(bytes(pose))
             if pt is None:
                 continue
-            positions[int(nid)] = pt
+            positions[nid] = pt
 
         if not positions:
             return {
@@ -352,6 +453,8 @@ def build_rtab_graph_json(
                 "env_raster_w": 0,
                 "env_raster_h": 0,
                 "env_raster_png_b64": "",
+                "env_raster_source": "",
+                "opt_map_bounds": None,
             }
 
         seen: Set[Tuple[int, int]] = set()
@@ -376,16 +479,25 @@ def build_rtab_graph_json(
         env_points: List[List[float]] = []
         env_nodes_used = 0
         env_pairs = 0
+        opt_map_bounds: Optional[Dict[str, float]] = None
+        opt_surface = None
         if include_environment:
-            try:
-                env_points, env_nodes_used, env_pairs = _collect_env_xy_points(
-                    con, max_points=max(4000, min(RTAB_MAP_ENV_MAX_POINTS, 400000))
-                )
-            except (sqlite3.Error, struct.error, zlib.error, MemoryError):
-                env_points = []
+            opt_surface = _try_load_admin_opt_map_surface(con)
+            if opt_surface:
+                opt_map_bounds = opt_surface[3]
+            if not opt_surface:
+                try:
+                    env_points, env_nodes_used, env_pairs = _collect_env_xy_points(
+                        con, max_points=max(4000, min(RTAB_MAP_ENV_MAX_POINTS, 400000))
+                    )
+                except (sqlite3.Error, struct.error, zlib.error, MemoryError):
+                    env_points = []
 
         xs = [p[0] for p in positions.values()]
         ys = [p[1] for p in positions.values()]
+        if opt_map_bounds:
+            xs.extend([opt_map_bounds["xmin"], opt_map_bounds["xmax"]])
+            ys.extend([opt_map_bounds["ymin"], opt_map_bounds["ymax"]])
         for q in env_points:
             xs.append(q[0])
             ys.append(q[1])
@@ -402,22 +514,38 @@ def build_rtab_graph_json(
         env_raster_w = 0
         env_raster_h = 0
         env_raster_png_b64 = ""
-        if include_environment and include_raster and env_points:
-            try:
-                rast = _raster_env_to_grey_bytes(
-                    env_points,
-                    bounds,
-                    max(256, min(4096, RTAB_MAP_ENV_RASTER_MAX_SIDE)),
-                )
-                if rast is not None:
-                    cw_r, ch_r, grey = rast
+        env_raster_source = ""
+        if include_environment and include_raster:
+            if opt_surface:
+                try:
+                    cw_r, ch_r, grey, _ob = opt_surface
                     png_bytes = _png_grey8(cw_r, ch_r, grey)
                     env_raster_w = cw_r
                     env_raster_h = ch_r
                     env_raster_png_b64 = base64.standard_b64encode(png_bytes).decode("ascii")
+                    env_raster_source = "admin_opt_map"
                     env_points = []
-            except (ValueError, MemoryError, zlib.error, OSError):
-                pass
+                    env_pairs = 0
+                    env_nodes_used = len(opt_by_id)
+                except (ValueError, MemoryError, zlib.error, OSError):
+                    env_raster_source = ""
+            elif env_points:
+                try:
+                    rast = _raster_env_to_grey_bytes(
+                        env_points,
+                        bounds,
+                        max(256, min(4096, RTAB_MAP_ENV_RASTER_MAX_SIDE)),
+                    )
+                    if rast is not None:
+                        cw_r, ch_r, grey = rast
+                        png_bytes = _png_grey8(cw_r, ch_r, grey)
+                        env_raster_w = cw_r
+                        env_raster_h = ch_r
+                        env_raster_png_b64 = base64.standard_b64encode(png_bytes).decode("ascii")
+                        env_raster_source = "point_accum"
+                        env_points = []
+                except (ValueError, MemoryError, zlib.error, OSError):
+                    pass
 
         return {
             "success": True,
@@ -432,6 +560,8 @@ def build_rtab_graph_json(
             "env_raster_w": env_raster_w,
             "env_raster_h": env_raster_h,
             "env_raster_png_b64": env_raster_png_b64,
+            "env_raster_source": env_raster_source,
+            "opt_map_bounds": opt_map_bounds,
         }
     except sqlite3.Error as exc:
         return {
@@ -447,6 +577,8 @@ def build_rtab_graph_json(
             "env_raster_w": 0,
             "env_raster_h": 0,
             "env_raster_png_b64": "",
+            "env_raster_source": "",
+            "opt_map_bounds": None,
         }
     finally:
         if con is not None:
