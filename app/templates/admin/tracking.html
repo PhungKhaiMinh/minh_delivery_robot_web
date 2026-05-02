@@ -4,8 +4,9 @@
 {% block admin_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 <style>
-#admin-map { min-height: 560px; border-radius: 1rem; z-index: 1; background: #e8edf3; }
-.leaflet-image-layer.rtab-env-raster { mix-blend-mode: multiply; image-rendering: auto; }
+#admin-map { min-height: 560px; border-radius: 1rem; z-index: 1; background: #050508; }
+.leaflet-image-layer.rtab-env-raster { mix-blend-mode: normal; opacity: 1; filter: contrast(1.12) brightness(1.08); }
+.leaflet-container { background: #050508; }
 </style>
 {% endblock %}
 
@@ -24,7 +25,7 @@
         <h1 class="text-2xl font-bold text-slate-900">Tracking</h1>
         <p class="text-sm text-slate-500 mt-1">
             Bản đồ lấy từ file RTAB-Map <code class="text-xs bg-slate-200 px-1 rounded" x-text="dbLabel"></code>:
-            Graph (node + láng giềng) và môi trường dạng <strong>PNG raster</strong> (tích lũy scan/obstacle trên server — nhẹ hơn nhiều so với hàng chục nghìn điểm JSON).
+            graph + môi trường <strong>PNG raster</strong> (nhẹ). Laser: <code class="text-xs">world = Node.pose × scan_info.localTransform × (x,y)</code> — cùng chuỗi như Graph View trong RTAB-Map Database Viewer.
             Debug: thêm tham số URL <code class="text-xs">raster=0</code> để nhận <code class="text-xs">env_points</code> thô (JSON rất nặng).
             The map loads from the server — same URL, same admins see the same data.
             Nếu chưa có map trên server: vào <a href="/admin/settings" class="text-sky-700 font-medium hover:underline">Settings</a> để tải <code class="text-xs bg-slate-200 px-1 rounded">.db</code> một lần (Railway: Volume + <code class="text-xs bg-slate-200 px-1 rounded">RTAB_MAP_DB_PATH</code>).
@@ -207,7 +208,7 @@
                     L.imageOverlay(
                         'data:image/png;base64,' + graph.env_raster_png_b64,
                         rasterBounds,
-                        { opacity: 0.92, interactive: false, className: 'rtab-env-raster' }
+                        { opacity: 1, interactive: false, className: 'rtab-env-raster' }
                     ).addTo(map);
                 }
 
@@ -225,9 +226,9 @@
                         [worldToMapLatLng(a[0], a[1], b), worldToMapLatLng(bb[0], bb[1], b)],
                         {
                             renderer: canvasRenderer,
-                            weight: 1.2,
-                            opacity: 0.28,
-                            color: '#64748b',
+                            weight: 1.5,
+                            opacity: 0.5,
+                            color: '#94a3b8',
                             interactive: false,
                         }
                     ).addTo(map);
@@ -237,11 +238,11 @@
                     var ll = worldToMapLatLng(n.x, n.y, b);
                     L.circleMarker(ll, {
                         renderer: canvasRenderer,
-                        radius: 2.5,
-                        fillColor: '#0ea5e9',
-                        color: '#0369a1',
-                        weight: 0.5,
-                        fillOpacity: 0.65,
+                        radius: 2.8,
+                        fillColor: '#38bdf8',
+                        color: '#e0f2fe',
+                        weight: 0.75,
+                        fillOpacity: 0.88,
                     }).addTo(map).bindPopup(
                         '<b>Node ' + n.id + '</b><br>x: ' + Number(n.x).toFixed(3) + ' m<br>y: ' + Number(n.y).toFixed(3) + ' m'
                     );

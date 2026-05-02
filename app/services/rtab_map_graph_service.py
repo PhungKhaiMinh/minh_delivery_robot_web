@@ -2,6 +2,9 @@
 Đọc graph từ database RTAB-Map (vd. A5_night.db) để hiển thị trên Admin Tracking.
 
 Pose Node: BLOB 12 float (3×4 row-major), translation tại chỉ số 3, 7, 11 → dùng tx, ty làm mặt phẳng 2D.
+
+Điểm laser: RTAB-Map lưu ``scan_info`` (>=0.18) gồm format + range + **localTransform** 12 float;
+world = ``node_pose @ localTransform @ (lx, ly, 0)`` — khớp DB Viewer, không chỉ ``node_pose @ (lx,ly)``.
 Link type 0 = kNeighbor (theo RTAB-Map).
 """
 
@@ -68,6 +71,33 @@ def _uncompress_rtab_cv_blob(blob: bytes) -> Optional[Tuple[int, int, int, bytes
     return rows, cols, typ, raw
 
 
+_IDENTITY12: Tuple[float, ...] = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+
+
+def _parse_scan_local_transform(scan_info_b: Optional[bytes]) -> Tuple[float, ...]:
+    """
+    ``scan_info`` RTAB-Map >= 0.18.0: (7 + 12) float — 12 float cuối = Transform 3×4 laser→base.
+    Xem DBDriverSqlite3.cpp (memcpy scanLocalTransform từ dataFloat+7).
+    """
+    if not scan_info_b or len(scan_info_b) < 76:
+        return _IDENTITY12
+    try:
+        return struct.unpack("12f", bytes(scan_info_b)[28:76])
+    except struct.error:
+        return _IDENTITY12
+
+
+def _world_xy_chain(node12: Tuple[float, ...], local12: Tuple[float, ...], lx: float, ly: float) -> Tuple[float, float]:
+    """Áp localTransform lên điểm scan (x,y,z=0), rồi pose node — giống pipeline LaserScan trong RTAB-Map."""
+    lz = 0.0
+    x1 = local12[0] * lx + local12[1] * ly + local12[2] * lz + local12[3]
+    y1 = local12[4] * lx + local12[5] * ly + local12[6] * lz + local12[7]
+    z1 = local12[8] * lx + local12[9] * ly + local12[10] * lz + local12[11]
+    wx = node12[0] * x1 + node12[1] * y1 + node12[2] * z1 + node12[3]
+    wy = node12[4] * x1 + node12[5] * y1 + node12[6] * z1 + node12[7]
+    return wx, wy
+
+
 def _world_xy_from_pose_and_local(f12: Tuple[float, ...], lx: float, ly: float) -> Tuple[float, float]:
     """Áp pose 3×4 (12 float row-major) lên điểm local (x,y), z=0."""
     wx = f12[0] * lx + f12[1] * ly + f12[3]
@@ -84,7 +114,7 @@ def _collect_env_xy_points(con: sqlite3.Connection, max_points: int) -> Tuple[Li
     """
     rows = list(
         con.execute(
-            "SELECT n.pose, d.scan, d.obstacle_cells FROM Node n "
+            "SELECT n.pose, d.scan, d.obstacle_cells, d.scan_info FROM Node n "
             "INNER JOIN Data d ON n.id = d.id ORDER BY n.id"
         )
     )
@@ -96,7 +126,7 @@ def _collect_env_xy_points(con: sqlite3.Connection, max_points: int) -> Tuple[Li
     nodes_used = 0
     pair_samples = 0
 
-    for idx, (pose_b, scan_b, obs_b) in enumerate(rows):
+    for idx, (pose_b, scan_b, obs_b, scan_info_b) in enumerate(rows):
         if len(out) >= max_points:
             break
         if not pose_b or len(pose_b) < 48:
@@ -105,6 +135,8 @@ def _collect_env_xy_points(con: sqlite3.Connection, max_points: int) -> Tuple[Li
             f12 = struct.unpack("12f", bytes(pose_b)[:48])
         except struct.error:
             continue
+
+        local12 = _parse_scan_local_transform(scan_info_b if scan_info_b else None)
 
         remaining = max_points - len(out)
         nodes_left = n_rows - idx
@@ -150,7 +182,7 @@ def _collect_env_xy_points(con: sqlite3.Connection, max_points: int) -> Tuple[Li
                 j = pi * 2
                 if j + 1 >= len(floats):
                     break
-                wx, wy = _world_xy_from_pose_and_local(f12, floats[j], floats[j + 1])
+                wx, wy = _world_xy_chain(f12, local12, floats[j], floats[j + 1])
                 out.append([wx, wy])
                 pair_samples += 1
                 if len(out) >= max_points:
@@ -205,7 +237,7 @@ def _raster_env_to_grey_bytes(
     cw = max(1, min(cw, max_side))
     ch = max(1, min(ch, max_side))
     acc = bytearray(cw * ch)
-    step = 24
+    step = 16
     for q in env_points:
         try:
             wx, wy = float(q[0]), float(q[1])
@@ -239,10 +271,32 @@ def _raster_env_to_grey_bytes(
                     if xx < 0 or xx >= cw:
                         continue
                     nk = base + xx
-                    boost = m - 22 if (dy != 0 or dx != 0) else m
+                    boost = m - 18 if (dy != 0 or dx != 0) else m
                     if boost > 0:
                         out[nk] = min(255, max(out[nk], boost))
-    return cw, ch, bytes(out)
+    # Lần 2: làm liền cấu trúc giống Graph View (tường mảnh)
+    grey2 = bytes(out)
+    out3 = bytearray(grey2)
+    for y in range(ch):
+        for x in range(cw):
+            k = y * cw + x
+            m = grey2[k]
+            if m == 0:
+                continue
+            for dy in (-1, 0, 1):
+                yy = y + dy
+                if yy < 0 or yy >= ch:
+                    continue
+                base = yy * cw
+                for dx in (-1, 0, 1):
+                    xx = x + dx
+                    if xx < 0 or xx >= cw:
+                        continue
+                    nk = base + xx
+                    boost = m - 16 if (dy != 0 or dx != 0) else m
+                    if boost > 0:
+                        out3[nk] = min(255, max(out3[nk], boost))
+    return cw, ch, bytes(out3)
 
 
 def build_rtab_graph_json(
@@ -325,7 +379,7 @@ def build_rtab_graph_json(
         if include_environment:
             try:
                 env_points, env_nodes_used, env_pairs = _collect_env_xy_points(
-                    con, max_points=max(2000, min(RTAB_MAP_ENV_MAX_POINTS, 200000))
+                    con, max_points=max(4000, min(RTAB_MAP_ENV_MAX_POINTS, 400000))
                 )
             except (sqlite3.Error, struct.error, zlib.error, MemoryError):
                 env_points = []
