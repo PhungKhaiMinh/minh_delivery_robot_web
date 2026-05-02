@@ -1,6 +1,10 @@
 """
 Hoạch định lộ trình test: điểm đầu / cuối = địa điểm nhận sách (tọa center x,y),
-đi qua các waypoint robot (center) — Dijkstra trên đồ thị đầy đủ (khoảng cách Euclid).
+các đỉnh trung gian = waypoint robot (center). Robot chỉ đi theo các đoạn có thể
+mô hình hóa qua waypoint dataset — **không** có cạnh trực tiếp điểm đầu → điểm cuối;
+Dijkstra trên đồ thị đầy đủ còn lại (khoảng cách Euclid, mét).
+
+Ràng buộc: lộ trình luôn đi qua **ít nhất một** waypoint (cần dataset không rỗng).
 Kết quả: stage_x/y = center, stage_x_margin/y_margin = right_side (waypoint) hoặc margin (pickup).
 """
 
@@ -132,10 +136,14 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
     pts.append((float(ep["x"]), float(ep["y"])))
 
     n = len(pts)
-    if n < 2:
+    # Cần ít nhất: điểm đầu + 1 waypoint + điểm cuối (không cho đi thẳng pickup→pickup).
+    if n < 3:
         return None
 
     def dist_uv(u: int, v: int) -> float:
+        # Cấm cạnh trực tiếp điểm đầu → điểm cuối — robot phải đi qua ít nhất một waypoint.
+        if u == 0 and v == n - 1:
+            return math.inf
         return _euclid(pts[u], pts[v])
 
     path_idx = _dijkstra(n, dist_uv, 0, n - 1)

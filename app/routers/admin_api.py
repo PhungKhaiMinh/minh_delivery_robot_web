@@ -300,7 +300,8 @@ async def admin_test_route_plan(request: Request):
                 "success": False,
                 "message": (
                     "Không hoạch định được: kiểm tra id đầu/cuối khác nhau, catalog pickup, "
-                    "và dataset waypoint (center + right_side) không rỗng."
+                    "và dataset waypoint có ít nhất một waypoint (center + right_side hợp lệ). "
+                    "Lộ trình bắt buộc đi qua waypoint — không có đoạn thẳng chỉ từ điểm đầu tới điểm cuối."
                 ),
             },
         )
