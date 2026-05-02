@@ -234,9 +234,9 @@
     <div>
         <h2 class="text-xl font-bold text-slate-900">Địa điểm nhận sách — tọa độ local (x, y)</h2>
         <p class="text-sm text-slate-500 mt-1">
-            Chỉnh (x, y) theo mét (Bắc / Đông), cùng hệ với <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x</code> / <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y</code>.
-            Mặc định tính từ lat/lon và gốc GPS hiện tại của server; có thể ghi đè để dùng trong kịch bản tùy chỉnh bên dưới.
-            Lộ trình đơn hàng qua đồ thị Dijkstra vẫn dựa trên waypoint GPS — bảng này phục vụ đích tự do trên MQTT.
+            Thêm / xóa địa điểm (id, tên, lat, lon) và chỉnh (x, y) mét (Bắc / Đông) — cùng hệ với <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x</code> / <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y</code>.
+            Danh sách lưu trên server (Firestore hoặc DB local). Form đặt sách client dùng cùng catalog.
+            Lộ trình đơn tự động qua Dijkstra vẫn theo waypoint GPS trên đồ thị — điểm mới có thể không khớp node nếu lat/lon khác graph.
         </p>
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
@@ -244,31 +244,52 @@
             <table class="min-w-full text-sm">
                 <thead class="text-xs text-slate-500 bg-slate-50 border-b border-slate-200">
                     <tr>
-                        <th class="px-3 py-2 text-left font-medium">Địa điểm</th>
+                        <th class="px-3 py-2 text-left font-medium">ID</th>
+                        <th class="px-3 py-2 text-left font-medium">Tên</th>
                         <th class="px-3 py-2 text-right font-medium">Lat</th>
                         <th class="px-3 py-2 text-right font-medium">Lon</th>
                         <th class="px-3 py-2 text-right font-medium">X (m)</th>
                         <th class="px-3 py-2 text-right font-medium">Y (m)</th>
-                        <th class="px-3 py-2 text-left font-medium"></th>
+                        <th class="px-3 py-2 text-left font-medium w-32"></th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    <template x-for="(r, i) in rows" :key="r.id">
+                    <template x-for="(r, i) in rows" :key="r._rowKey">
                         <tr :class="r.overridden ? 'bg-amber-50/50' : ''">
-                            <td class="px-3 py-2 font-medium text-slate-800" x-text="r.name"></td>
-                            <td class="px-3 py-2 text-right font-mono text-xs text-slate-600" x-text="fmtCoord(r.lat)"></td>
-                            <td class="px-3 py-2 text-right font-mono text-xs text-slate-600" x-text="fmtCoord(r.lng)"></td>
+                            <td class="px-3 py-2 align-top">
+                                <template x-if="r._isNew">
+                                    <input type="text" x-model="r.idStr" spellcheck="false" placeholder="vd: p_abc123"
+                                        class="w-full min-w-[6rem] max-w-[10rem] px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono focus:ring-2 focus:ring-sky-500" />
+                                </template>
+                                <template x-if="!r._isNew">
+                                    <span class="font-mono text-xs text-slate-700" x-text="r.id"></span>
+                                </template>
+                            </td>
+                            <td class="px-3 py-2">
+                                <input type="text" x-model="r.nameStr" spellcheck="false" placeholder="Tên hiển thị"
+                                    class="w-full min-w-[6rem] max-w-[12rem] px-2 py-1.5 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-sky-500" />
+                            </td>
+                            <td class="px-3 py-2">
+                                <input type="text" inputmode="decimal" x-model="r.latStr" spellcheck="false" placeholder="10.77…"
+                                    class="w-full min-w-[5.5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
+                            </td>
+                            <td class="px-3 py-2">
+                                <input type="text" inputmode="decimal" x-model="r.lngStr" spellcheck="false" placeholder="106.65…"
+                                    class="w-full min-w-[5.5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
+                            </td>
                             <td class="px-3 py-2">
                                 <input type="text" inputmode="decimal" x-model="r.xStr" spellcheck="false"
-                                    class="w-full min-w-[6.5rem] max-w-[10rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
+                                    class="w-full min-w-[5.5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
                             </td>
                             <td class="px-3 py-2">
                                 <input type="text" inputmode="decimal" x-model="r.yStr" spellcheck="false"
-                                    class="w-full min-w-[6.5rem] max-w-[10rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
+                                    class="w-full min-w-[5.5rem] max-w-[9rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
                             </td>
-                            <td class="px-3 py-2">
+                            <td class="px-3 py-2 align-top whitespace-nowrap space-y-1">
                                 <button type="button" @click="resetRow(i)"
-                                    class="text-xs font-semibold text-sky-700 hover:underline whitespace-nowrap">Từ GPS</button>
+                                    class="block text-xs font-semibold text-sky-700 hover:underline">Từ GPS</button>
+                                <button type="button" @click="removeRow(i)" x-show="rows.length > 1"
+                                    class="block text-xs font-semibold text-red-600 hover:underline">Xóa</button>
                             </td>
                         </tr>
                     </template>
@@ -276,10 +297,14 @@
             </table>
         </div>
         <div class="flex flex-wrap items-center gap-3">
+            <button type="button" @click="addRow()"
+                class="px-4 py-2 rounded-xl text-sm font-semibold border border-slate-300 bg-white text-slate-800 hover:bg-slate-50">
+                + Thêm địa điểm
+            </button>
             <button type="button" @click="save()"
                 :disabled="saving"
                 class="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50">
-                <span x-show="!saving">Lưu tọa độ</span>
+                <span x-show="!saving">Lưu</span>
                 <span x-show="saving">Đang lưu…</span>
             </button>
             <span class="text-xs text-emerald-700 font-medium" x-show="saveMsg" x-text="saveMsg"></span>
@@ -777,19 +802,26 @@ window._doDeleteOrder = async function (id) {
         return [];
     }
 
+    var _rowKeySeq = 0;
+    function nextRowKey() {
+        _rowKeySeq += 1;
+        return 'rk_' + _rowKeySeq;
+    }
+
     function mapLocToRow(loc) {
-        var dx = loc.default_x != null ? loc.default_x : loc.x;
-        var dy = loc.default_y != null ? loc.default_y : loc.y;
         return {
+            _rowKey: nextRowKey(),
             id: loc.id,
-            name: loc.name,
-            lat: loc.lat,
-            lng: loc.lng,
-            default_x: dx,
-            default_y: dy,
+            idStr: String(loc.id),
+            nameStr: loc.name != null ? String(loc.name) : '',
+            latStr: loc.lat != null ? String(loc.lat) : '',
+            lngStr: loc.lng != null ? String(loc.lng) : '',
+            default_x: loc.default_x != null ? Number(loc.default_x) : 0,
+            default_y: loc.default_y != null ? Number(loc.default_y) : 0,
             overridden: !!loc.overridden,
             xStr: loc.x != null ? String(Number(loc.x).toFixed(4)) : '',
             yStr: loc.y != null ? String(Number(loc.y).toFixed(4)) : '',
+            _isNew: false,
         };
     }
 
@@ -800,16 +832,40 @@ window._doDeleteOrder = async function (id) {
             saveMsg: '',
             saveErr: '',
 
-            fmtCoord(v) {
-                if (v == null || v === '') return '—';
-                var n = Number(v);
-                if (!Number.isFinite(n)) return String(v);
-                return n.toFixed(7);
-            },
-
             init() {
                 var initial = readPickupLocationsBoot();
                 this.rows = (Array.isArray(initial) ? initial : []).map(mapLocToRow);
+            },
+
+            addRow() {
+                var hex = '';
+                try {
+                    var a = new Uint8Array(4);
+                    crypto.getRandomValues(a);
+                    hex = Array.from(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+                } catch (e) {
+                    hex = String(Date.now());
+                }
+                var nid = 'p_' + hex;
+                this.rows.push({
+                    _rowKey: nextRowKey(),
+                    id: nid,
+                    idStr: nid,
+                    nameStr: '',
+                    latStr: '',
+                    lngStr: '',
+                    default_x: 0,
+                    default_y: 0,
+                    overridden: false,
+                    xStr: '0',
+                    yStr: '0',
+                    _isNew: true,
+                });
+            },
+
+            removeRow(i) {
+                if (this.rows.length <= 1) return;
+                this.rows.splice(i, 1);
             },
 
             resetRow(i) {
@@ -829,18 +885,50 @@ window._doDeleteOrder = async function (id) {
             async save() {
                 this.saveMsg = '';
                 this.saveErr = '';
-                var tol = 1e-3;
-                var overrides = {};
-                for (var i = 0; i < this.rows.length; i++) {
+                var idRe = /^[a-zA-Z0-9_-]{1,64}$/;
+                var locations = [];
+                var i;
+                for (i = 0; i < this.rows.length; i++) {
                     var r = this.rows[i];
-                    var x = parseFloat(String(r.xStr != null ? r.xStr : '').replace(',', '.'));
-                    var y = parseFloat(String(r.yStr != null ? r.yStr : '').replace(',', '.'));
-                    if (Number.isNaN(x) || Number.isNaN(y)) {
-                        this.saveErr = 'Mỗi dòng cần x, y hợp lệ (số).';
+                    var id = r._isNew ? String(r.idStr || '').trim() : String(r.id || '').trim();
+                    var name = String(r.nameStr != null ? r.nameStr : '').trim();
+                    if (!idRe.test(id)) {
+                        this.saveErr = 'ID không hợp lệ (dòng ' + (i + 1) + '): chỉ chữ, số, _, - và tối đa 64 ký tự.';
                         return;
                     }
-                    if (Math.abs(x - r.default_x) > tol || Math.abs(y - r.default_y) > tol) {
-                        overrides[r.id] = { x: x, y: y };
+                    if (!name) {
+                        this.saveErr = 'Tên địa điểm không được trống (dòng ' + (i + 1) + ').';
+                        return;
+                    }
+                    var lat = parseFloat(String(r.latStr || '').replace(',', '.'));
+                    var lng = parseFloat(String(r.lngStr || '').replace(',', '.'));
+                    if (Number.isNaN(lat) || Number.isNaN(lng)) {
+                        this.saveErr = 'Lat / Lon phải là số (dòng ' + (i + 1) + ').';
+                        return;
+                    }
+                    locations.push({ id: id, name: name, lat: lat, lng: lng });
+                }
+                var seen = {};
+                for (i = 0; i < locations.length; i++) {
+                    if (seen[locations[i].id]) {
+                        this.saveErr = 'Trùng ID: ' + locations[i].id;
+                        return;
+                    }
+                    seen[locations[i].id] = true;
+                }
+                var tol = 1e-3;
+                var overrides = {};
+                for (i = 0; i < this.rows.length; i++) {
+                    var row = this.rows[i];
+                    var id0 = row._isNew ? String(row.idStr || '').trim() : String(row.id || '').trim();
+                    var x = parseFloat(String(row.xStr != null ? row.xStr : '').replace(',', '.'));
+                    var y = parseFloat(String(row.yStr != null ? row.yStr : '').replace(',', '.'));
+                    if (Number.isNaN(x) || Number.isNaN(y)) {
+                        this.saveErr = 'X / Y phải là số (dòng ' + (i + 1) + ').';
+                        return;
+                    }
+                    if (Math.abs(x - row.default_x) > tol || Math.abs(y - row.default_y) > tol) {
+                        overrides[id0] = { x: x, y: y };
                     }
                 }
                 this.saving = true;
@@ -849,7 +937,7 @@ window._doDeleteOrder = async function (id) {
                         method: 'PUT',
                         credentials: 'same-origin',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ overrides: overrides }),
+                        body: JSON.stringify({ locations: locations, overrides: overrides }),
                     });
                     var data = await res.json().catch(function () { return null; });
                     if (!res.ok || !data || !data.success) {

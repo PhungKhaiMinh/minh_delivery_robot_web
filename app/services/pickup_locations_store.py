@@ -1,23 +1,102 @@
 """
-Tọa độ local (x, y) ghi đè cho địa điểm nhận sách (CAMPUS_LOCATIONS).
-Lưu trong admin_config / pickup_locations_xy — dùng cho kịch bản tùy chỉnh trên Admin Orders.
+Danh sách địa điểm nhận sách (catalog) + ghi đè tọa độ local (x, y).
+Catalog: admin_config / pickup_locations_catalog — nếu trống thì dùng CAMPUS_LOCATIONS trong config.
+XY: admin_config / pickup_locations_xy → overrides theo id.
 """
 
 from __future__ import annotations
 
+import copy
 import math
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, List, Optional
 
 from app.config import CAMPUS_LOCATIONS
 from app.services.db_service import db
 from app.services.pathfinding_service import gps_to_local
 
 ADMIN_CONFIG_COLLECTION = "admin_config"
+PICKUP_CATALOG_DOC_ID = "pickup_locations_catalog"
 PICKUP_XY_DOC_ID = "pickup_locations_xy"
+
+_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def get_catalog_locations() -> List[Dict[str, Any]]:
+    """Danh sách {id, name, lat, lng} — từ DB hoặc bản sao CAMPUS_LOCATIONS."""
+    doc = db.collection(ADMIN_CONFIG_COLLECTION).document(PICKUP_CATALOG_DOC_ID).get()
+    if not doc:
+        return copy.deepcopy(list(CAMPUS_LOCATIONS))
+    raw = doc.get("locations")
+    if not isinstance(raw, list) or len(raw) == 0:
+        return copy.deepcopy(list(CAMPUS_LOCATIONS))
+    out: List[Dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        norm = _normalize_catalog_item(item)
+        if norm:
+            out.append(norm)
+    return out if out else copy.deepcopy(list(CAMPUS_LOCATIONS))
+
+
+def _normalize_catalog_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    lid = str(item.get("id", "")).strip()
+    name = str(item.get("name", "")).strip()
+    if not lid or not _ID_RE.match(lid):
+        return None
+    if not name or len(name) > 200:
+        return None
+    try:
+        lat = float(item["lat"])
+        lng = float(item["lng"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+        return None
+    if not (math.isfinite(lat) and math.isfinite(lng)):
+        return None
+    return {"id": lid, "name": name, "lat": lat, "lng": lng}
+
+
+def set_pickup_catalog(locations: List[Dict[str, Any]]) -> bool:
+    """Ghi đè toàn bộ catalog (đã chuẩn hóa, ít nhất 1 địa điểm)."""
+    seen: set[str] = set()
+    clean: List[Dict[str, Any]] = []
+    for item in locations:
+        if not isinstance(item, dict):
+            continue
+        norm = _normalize_catalog_item(item)
+        if not norm:
+            return False
+        if norm["id"] in seen:
+            return False
+        seen.add(norm["id"])
+        clean.append(norm)
+    if len(clean) < 1:
+        return False
+    ref = db.collection(ADMIN_CONFIG_COLLECTION).document(PICKUP_CATALOG_DOC_ID)
+    if not ref.set({"locations": clean}, merge=True):
+        return False
+    _prune_xy_overrides_to_ids(seen)
+    return True
+
+
+def _prune_xy_overrides_to_ids(allowed: set[str]) -> None:
+    doc = db.collection(ADMIN_CONFIG_COLLECTION).document(PICKUP_XY_DOC_ID).get()
+    if not doc:
+        return
+    raw = doc.get("overrides")
+    if not isinstance(raw, dict):
+        return
+    pruned = {k: v for k, v in raw.items() if str(k) in allowed and isinstance(v, dict)}
+    db.collection(ADMIN_CONFIG_COLLECTION).document(PICKUP_XY_DOC_ID).set(
+        {"overrides": pruned}, merge=True
+    )
 
 
 def _allowed_location_ids() -> set[str]:
-    return {str(loc["id"]) for loc in CAMPUS_LOCATIONS}
+    return {str(loc["id"]) for loc in get_catalog_locations()}
 
 
 def get_pickup_xy_overrides() -> Dict[str, Dict[str, float]]:
@@ -30,7 +109,8 @@ def get_pickup_xy_overrides() -> Dict[str, Dict[str, float]]:
     allowed = _allowed_location_ids()
     out: Dict[str, Dict[str, float]] = {}
     for lid, v in raw.items():
-        if lid not in allowed:
+        sl = str(lid)
+        if sl not in allowed:
             continue
         if not isinstance(v, dict):
             continue
@@ -43,7 +123,7 @@ def get_pickup_xy_overrides() -> Dict[str, Dict[str, float]]:
             continue
         if abs(x) > 1e6 or abs(y) > 1e6:
             continue
-        out[str(lid)] = {"x": x, "y": y}
+        out[sl] = {"x": x, "y": y}
     return out
 
 
@@ -51,7 +131,7 @@ def list_pickup_locations_admin() -> List[Dict[str, Any]]:
     """Mỗi phần tử: id, name, lat, lng, default_x, default_y, x, y, overridden."""
     overrides = get_pickup_xy_overrides()
     rows: List[Dict[str, Any]] = []
-    for loc in CAMPUS_LOCATIONS:
+    for loc in get_catalog_locations():
         lid = str(loc["id"])
         lat = float(loc["lat"])
         lng = float(loc["lng"])
@@ -80,7 +160,7 @@ def list_pickup_locations_admin() -> List[Dict[str, Any]]:
 
 
 def set_pickup_xy_overrides(raw: Dict[str, Any]) -> bool:
-    """Ghi đè toàn bộ map overrides (chỉ id thuộc CAMPUS_LOCATIONS)."""
+    """Ghi đè toàn bộ map overrides (chỉ id thuộc catalog hiện tại)."""
     allowed = _allowed_location_ids()
     clean: Dict[str, Dict[str, float]] = {}
     for lid, v in raw.items():
@@ -101,3 +181,15 @@ def set_pickup_xy_overrides(raw: Dict[str, Any]) -> bool:
         clean[sl] = {"x": x, "y": y}
     ref = db.collection(ADMIN_CONFIG_COLLECTION).document(PICKUP_XY_DOC_ID)
     return ref.set({"overrides": clean}, merge=True)
+
+
+def apply_pickup_catalog_and_overrides(
+    locations: List[Dict[str, Any]],
+    overrides: Optional[Dict[str, Any]],
+) -> bool:
+    """Cập nhật catalog rồi ghi overrides (toàn bộ map overrides từ client)."""
+    if not set_pickup_catalog(locations):
+        return False
+    if overrides is None:
+        return True
+    return set_pickup_xy_overrides(overrides)

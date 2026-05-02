@@ -11,12 +11,12 @@ from datetime import datetime, timezone
 from app.services.db_service import db
 from app.services.robot_service import send_booking_to_robot
 from app.models.booking import BookingCreate, BookingStatus, BookingResponse
-from app.config import CAMPUS_LOCATIONS
+from app.services.pickup_locations_store import get_catalog_locations
 
 
 def get_location_by_id(location_id: str) -> Optional[dict]:
-    """Tìm thông tin địa điểm theo ID từ danh sách cấu hình."""
-    for loc in CAMPUS_LOCATIONS:
+    """Tìm thông tin địa điểm theo ID (catalog admin + mặc định config)."""
+    for loc in get_catalog_locations():
         if loc["id"] == location_id:
             return loc
     return None

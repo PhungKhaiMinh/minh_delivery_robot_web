@@ -222,9 +222,10 @@ def find_nearest_waypoint(lat: float, lon: float) -> int:
 # ---------------------------------------------------------------------------
 
 def find_waypoint_idx_by_location_id(location_id: str) -> Optional[int]:
-    """Map a CAMPUS_LOCATIONS id (e.g. 'b1') to the corresponding CAMPUS_WAYPOINTS index."""
-    from app.config import CAMPUS_LOCATIONS
-    loc = next((l for l in CAMPUS_LOCATIONS if l["id"] == location_id), None)
+    """Map a pickup location id to the corresponding CAMPUS_WAYPOINTS index (theo lat/lon)."""
+    from app.services.pickup_locations_store import get_catalog_locations
+
+    loc = next((l for l in get_catalog_locations() if l["id"] == location_id), None)
     if loc is None:
         return None
     for wp in CAMPUS_WAYPOINTS:

@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from datetime import datetime
 
-from app.config import CAMPUS_LOCATIONS
+from app.services.pickup_locations_store import get_catalog_locations
 from app.services.auth_service import get_current_user
 from app.services.booking_service import get_user_bookings, get_active_bookings, get_booking_by_id
 from app.services.db_service import db
@@ -123,7 +123,7 @@ async def page_booking(request: Request):
         {
             "user": user,
             "active_page": "booking",
-            "locations": CAMPUS_LOCATIONS,
+            "locations": get_catalog_locations(),
             "today": today,
             "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
         },
@@ -158,7 +158,7 @@ async def page_order_detail(booking_id: str, request: Request):
             "is_active": is_active,
             "robot_status": robot["status"],
             "robot_battery": robot["battery"],
-            "locations": CAMPUS_LOCATIONS,
+            "locations": get_catalog_locations(),
             "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
         },
     )

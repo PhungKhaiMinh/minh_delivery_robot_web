@@ -38,7 +38,11 @@ from app.services.pathfinding_service import (
     get_campus_gps_origin,
 )
 from app.services.mqtt_client import mqtt_service
-from app.services.pickup_locations_store import list_pickup_locations_admin, set_pickup_xy_overrides
+from app.services.pickup_locations_store import (
+    apply_pickup_catalog_and_overrides,
+    list_pickup_locations_admin,
+    set_pickup_xy_overrides,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["Admin API"])
 
@@ -182,12 +186,29 @@ async def admin_get_pickup_locations(request: Request):
 
 @router.put("/pickup-locations/overrides")
 async def admin_put_pickup_xy_overrides(request: Request):
-    """Thay thế toàn bộ map ghi đè x,y (met, Bắc/Đông) cho từng địa điểm nhận sách."""
+    """Cập nhật catalog địa điểm (nếu có `locations`) và/hoặc map ghi đè x,y (`overrides`)."""
     require_admin(request)
     try:
         body = await request.json()
     except Exception:
         body = {}
+    locs = body.get("locations")
+    if isinstance(locs, list):
+        ovs = body.get("overrides")
+        if not isinstance(ovs, dict):
+            ovs = {}
+        if not apply_pickup_catalog_and_overrides(locs, ovs):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": (
+                        "Dữ liệu không hợp lệ: cần ít nhất một địa điểm; id (chữ, số, _,-) tối đa 64 ký tự, "
+                        "tên không rỗng, lat/lon hợp lệ, không trùng id."
+                    ),
+                },
+            )
+        return JSONResponse(content={"success": True, "locations": list_pickup_locations_admin()})
     raw = body.get("overrides")
     if not isinstance(raw, dict):
         return JSONResponse(
