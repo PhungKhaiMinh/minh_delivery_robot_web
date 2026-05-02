@@ -114,18 +114,17 @@
             '</svg>';
     }
 
-    /** RTAB pose: translation tx, ty at float indices 3 and 7 — same convention as robot x,y on map plane */
+    /** Leaflet CRS.Simple: wx, wy (m) trong bounds b → LatLng */
     function worldToMapLatLng(wx, wy, b) {
         return L.latLng(b.ymax - wy, wx - b.xmin);
     }
 
-    /** Lật trái–phải (đối xứng qua trục dọc giữa bounds): dùng chỉ cho lớp graph xanh, không đổi raster / robot. */
-    function mirrorWorldX(wx, bb) {
-        return bb.xmin + bb.xmax - wx;
-    }
-
-    function graphNodeToMapLatLng(wx, wy, bb) {
-        return worldToMapLatLng(mirrorWorldX(wx, bb), wy, bb);
+    /**
+     * Lật graph theo trục dọc trên mặt phẳng world: đối xứng qua đường ngang giữa bounds (y' = ymin + ymax - y).
+     * Chỉ dùng cho hiển thị node/cạnh xanh; robot và MQTT giữ tọa độ gốc.
+     */
+    function graphDisplayWorldY(wy, bb) {
+        return bb.ymin + bb.ymax - wy;
     }
 
     function haversineMeters(a, b) {
@@ -243,7 +242,6 @@
                 }
 
                 canvasRenderer = L.canvas({ padding: 0.5 });
-                var svgRenderer = L.svg({ padding: 0.35 });
 
                 var graphStyle = (graph.env_raster_source === 'admin_opt_map')
                     ? { linkW: 1.15, linkOp: 0.58, linkHex: '#5eead4', nodeR: 2.35, nodeFill: '#14b8a6', nodeStroke: '#ccfbf1', nodeSw: 0.55 }
@@ -251,14 +249,22 @@
 
                 var posById = {};
                 (graph.nodes || []).forEach(function (n) {
-                    posById[n.id] = [n.x, n.y];
+                    var nx = Number(n.x), ny = Number(n.y);
+                    posById[n.id] = {
+                        x: nx,
+                        y: ny,
+                        dispY: graphDisplayWorldY(ny, b),
+                    };
                 });
 
                 (graph.links || []).forEach(function (link) {
-                    var a = posById[link[0]], bb = posById[link[1]];
-                    if (!a || !bb) return;
+                    var pa = posById[link[0]], pb = posById[link[1]];
+                    if (!pa || !pb) return;
                     L.polyline(
-                        [graphNodeToMapLatLng(a[0], a[1], b), graphNodeToMapLatLng(bb[0], bb[1], b)],
+                        [
+                            worldToMapLatLng(pa.x, pa.dispY, b),
+                            worldToMapLatLng(pb.x, pb.dispY, b),
+                        ],
                         {
                             renderer: canvasRenderer,
                             weight: graphStyle.linkW,
@@ -270,25 +276,29 @@
                 });
 
                 (graph.nodes || []).forEach(function (n) {
-                    var ll = graphNodeToMapLatLng(n.x, n.y, b);
-                    var xf = Number(n.x), yf = Number(n.y);
-                    var popupHtml = '<div class="text-sm">' +
-                        '<div class="font-semibold text-slate-800">Node ' + n.id + '</div>' +
-                        '<div class="mt-1 font-mono text-slate-700">x = ' + xf.toFixed(3) + ' m</div>' +
-                        '<div class="font-mono text-slate-700">y = ' + yf.toFixed(3) + ' m</div>' +
-                        '<div class="mt-1 text-xs text-slate-500">Tọa độ từ DB (m). Graph xanh đã lật trái–phải so với raster.</div>' +
-                        '<div class="text-xs text-slate-500">DB coordinates (m). Cyan graph is mirrored L–R vs raster.</div>' +
-                        '</div>';
+                    var p = posById[n.id];
+                    if (!p) return;
+                    var ll = worldToMapLatLng(p.x, p.dispY, b);
+                    var px = p.x.toFixed(4);
+                    var py = p.y.toFixed(4);
+                    var popupHtml =
+                        '<div class="text-sm"><b>Node ' + n.id + '</b></div>' +
+                        '<div class="text-xs mt-1 text-slate-700">Tọa độ (m)</div>' +
+                        '<div class="font-mono text-xs mt-0.5"><span class="text-slate-500">x</span> = ' + px +
+                        '<br><span class="text-slate-500">y</span> = ' + py + '</div>';
                     L.circleMarker(ll, {
-                        renderer: svgRenderer,
-                        radius: graphStyle.nodeR,
+                        radius: Math.max(3.2, graphStyle.nodeR),
                         fillColor: graphStyle.nodeFill,
                         color: graphStyle.nodeStroke,
                         weight: graphStyle.nodeSw,
                         fillOpacity: 0.9,
                         interactive: true,
                         bubblingMouseEvents: true,
-                    }).addTo(map).bindPopup(popupHtml, { maxWidth: 260, closeButton: true, autoPan: true });
+                    }).addTo(map).bindPopup(popupHtml, {
+                        closeButton: true,
+                        autoPan: true,
+                        autoPanPadding: [12, 12],
+                    });
                 });
 
                 if (!(graph.env_raster_png_b64 && graph.env_raster_w > 0)) {
