@@ -17,7 +17,7 @@
     "topicPose": mqtt_topic_pose,
     "mqttUser": mqtt_username,
     "mqttPass": mqtt_password,
-    "graphUrl": "/api/admin/rtab-map/graph?env=1&raster=1",
+    "graphUrl": "/api/admin/rtab-map/graph?env=1&raster=1&use_opt_map=1",
     "rtabDbLabel": rtab_map_db_path,
 } %}
 <div class="max-w-7xl mx-auto space-y-6" x-data='adminTracking({{ tracking_cfg|tojson }})'>
@@ -26,7 +26,8 @@
         <p class="text-sm text-slate-500 mt-1">
             Bản đồ lấy từ file RTAB-Map <code class="text-xs bg-slate-200 px-1 rounded" x-text="dbLabel"></code>:
             graph + môi trường <strong>PNG</strong>: nếu DB đã chạy Graph Optimizer, dùng trực tiếp <code class="text-xs">Admin.opt_map</code> + <code class="text-xs">opt_poses</code> (giống Graph View); không thì ghép điểm laser.
-            Debug: thêm tham số URL <code class="text-xs">raster=0</code> để nhận <code class="text-xs">env_points</code> thô (JSON rất nặng).
+            Debug: <code class="text-xs">raster=0</code> → <code class="text-xs">env_points</code> thô (JSON rất nặng);
+            <code class="text-xs">use_opt_map=0</code> → bỏ lớp Admin.opt_map, vẽ đủ node + laser (nếu lệch khung tối ưu).
             The map loads from the server — same URL, same admins see the same data.
             Nếu chưa có map trên server: vào <a href="/admin/settings" class="text-sky-700 font-medium hover:underline">Settings</a> để tải <code class="text-xs bg-slate-200 px-1 rounded">.db</code> một lần (Railway: Volume + <code class="text-xs bg-slate-200 px-1 rounded">RTAB_MAP_DB_PATH</code>).
             Hệ trục hiển thị trùng với tọa độ local <strong>x, y</strong> (mét) từ
@@ -124,7 +125,7 @@
     function adminTracking(cfg) {
         cfg = cfg || {};
         var topicPose = cfg.topicPose || 'UGV/localization/pose';
-        var graphUrl = cfg.graphUrl || '/api/admin/rtab-map/graph?env=1&raster=1';
+        var graphUrl = cfg.graphUrl || '/api/admin/rtab-map/graph?env=1&raster=1&use_opt_map=1';
 
         var map = null;
         var graphBounds = null;
@@ -188,6 +189,7 @@
                 self.graphMeta = 'Nguồn: ' + (graph.source || 'RTAB-Map') + ' — ' +
                     (graph.nodes ? graph.nodes.length : 0) + ' node, ' +
                     (graph.links ? graph.links.length : 0) + ' cạnh láng giềng' +
+                    (graph.optimized_graph_only ? ' (graph khớp opt_map)' : '') +
                     (rw > 0
                         ? (', môi trường PNG ' + rw + '×' + rh +
                             (graph.env_raster_source === 'admin_opt_map' ? ' (Admin opt_map)' : ''))
@@ -196,7 +198,7 @@
                 map = L.map('admin-map', {
                     crs: L.CRS.Simple,
                     minZoom: -4,
-                    maxZoom: 12,
+                    maxZoom: 18,
                     maxBoundsViscosity: 1.0,
                     zoomSnap: 0.25,
                     zoomDelta: 0.5,

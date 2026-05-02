@@ -140,16 +140,46 @@ def _load_optimized_poses_by_id(con: sqlite3.Connection) -> Dict[int, Tuple[floa
 
 
 def _occ_byte_to_grey(v: int) -> int:
-    """Giá trị occupancy RTAB-Map phổ biến: 0 free, 100 obstacle, 255 unknown."""
+    """Occupancy RTAB: 0 free, 100 obstacle, 255 unknown — hiển thị đủ vùng đã map (không chỉ chấm trắng)."""
     if v == 100:
-        return 248
+        return 252
     if v == 0:
-        return 0
+        return 18
     if v == 255:
-        return 0
-    if 40 <= v <= 127:
-        return min(255, 70 + v)
-    return 0
+        return 48
+    if 1 <= v <= 99:
+        return min(255, 60 + v * 2)
+    return 40
+
+
+def _grey_dilate_max(grey: bytes, cw: int, ch: int, neighbor_sub: int = 8) -> bytes:
+    """Giãn vùng obstacle một nếp để tường liền hơn (grid nhỏ)."""
+    src = memoryview(grey)
+    out = bytearray(grey)
+    for y in range(ch):
+        for x in range(cw):
+            k = y * cw + x
+            m = int(src[k])
+            if m < 90:
+                continue
+            for dy in (-1, 0, 1):
+                yy = y + dy
+                if yy < 0 or yy >= ch:
+                    continue
+                base = yy * cw
+                for dx in (-1, 0, 1):
+                    xx = x + dx
+                    if xx < 0 or xx >= cw:
+                        continue
+                    nk = base + xx
+                    boost = m - neighbor_sub if (dx != 0 or dy != 0) else m
+                    if boost > 0:
+                        out[nk] = min(255, max(out[nk], boost))
+    return bytes(out)
+
+
+# opt_map trong DB: hàng OpenCV tăng theo y; Leaflet NW = wy lớn — nếu lệch dọc, thử đổi cờ này.
+_OPT_MAP_FLIP_ROWS_FOR_LEAFLET = True
 
 
 def _try_load_admin_opt_map_surface(
@@ -184,11 +214,15 @@ def _try_load_admin_opt_map_surface(
     bmap = {"xmin": x_min, "xmax": xmax, "ymin": y_min, "ymax": ymax}
     grey = bytearray(n_cols * n_rows)
     for r in range(n_rows):
-        iy = n_rows - 1 - r
         base = r * n_cols
+        if _OPT_MAP_FLIP_ROWS_FOR_LEAFLET:
+            iy = n_rows - 1 - r
+        else:
+            iy = r
         for c in range(n_cols):
             grey[iy * n_cols + c] = _occ_byte_to_grey(raw[base + c])
-    return n_cols, n_rows, bytes(grey), bmap
+    grey_b = _grey_dilate_max(bytes(grey), n_cols, n_rows)
+    return n_cols, n_rows, grey_b, bmap
 
 
 def _world_xy_from_pose_and_local(f12: Tuple[float, ...], lx: float, ly: float) -> Tuple[float, float]:
@@ -396,6 +430,7 @@ def build_rtab_graph_json(
     db_path: Optional[str] = None,
     include_environment: bool = True,
     include_raster: bool = True,
+    prefer_admin_opt_map: bool = True,
 ) -> Dict[str, Any]:
     """Trả JSON cho Leaflet CRS.Simple: bounds, nodes, links; môi trường mặc định là PNG raster (nhẹ)."""
     path = Path(db_path or RTAB_MAP_DB_PATH).resolve()
@@ -415,6 +450,7 @@ def build_rtab_graph_json(
             "env_raster_png_b64": "",
             "env_raster_source": "",
             "opt_map_bounds": None,
+            "optimized_graph_only": False,
         }
 
     con: Optional[sqlite3.Connection] = None
@@ -427,17 +463,37 @@ def build_rtab_graph_json(
 
         opt_by_id = _load_optimized_poses_by_id(con)
 
+        opt_surface: Optional[Tuple[int, int, bytes, Dict[str, float]]] = None
+        opt_map_bounds: Optional[Dict[str, float]] = None
+        if include_environment:
+            opt_surface = _try_load_admin_opt_map_surface(con)
+            if opt_surface:
+                opt_map_bounds = opt_surface[3]
+
+        use_admin_raster = bool(
+            prefer_admin_opt_map
+            and opt_surface
+            and opt_by_id
+            and include_raster
+            and include_environment
+        )
+
         positions: Dict[int, Tuple[float, float]] = {}
         cur = con.execute("SELECT id, pose FROM Node WHERE pose IS NOT NULL")
         for nid, pose in cur:
             nid = int(nid)
-            if nid in opt_by_id:
+            if use_admin_raster:
+                if nid not in opt_by_id:
+                    continue
                 positions[nid] = _tx_ty_from_pose12(opt_by_id[nid])
-                continue
-            pt = _pose_tx_ty(bytes(pose))
-            if pt is None:
-                continue
-            positions[nid] = pt
+            else:
+                if nid in opt_by_id:
+                    positions[nid] = _tx_ty_from_pose12(opt_by_id[nid])
+                else:
+                    pt = _pose_tx_ty(bytes(pose))
+                    if pt is None:
+                        continue
+                    positions[nid] = pt
 
         if not positions:
             return {
@@ -455,6 +511,7 @@ def build_rtab_graph_json(
                 "env_raster_png_b64": "",
                 "env_raster_source": "",
                 "opt_map_bounds": None,
+                "optimized_graph_only": False,
             }
 
         seen: Set[Tuple[int, int]] = set()
@@ -479,19 +536,13 @@ def build_rtab_graph_json(
         env_points: List[List[float]] = []
         env_nodes_used = 0
         env_pairs = 0
-        opt_map_bounds: Optional[Dict[str, float]] = None
-        opt_surface = None
-        if include_environment:
-            opt_surface = _try_load_admin_opt_map_surface(con)
-            if opt_surface:
-                opt_map_bounds = opt_surface[3]
-            if not opt_surface:
-                try:
-                    env_points, env_nodes_used, env_pairs = _collect_env_xy_points(
-                        con, max_points=max(4000, min(RTAB_MAP_ENV_MAX_POINTS, 400000))
-                    )
-                except (sqlite3.Error, struct.error, zlib.error, MemoryError):
-                    env_points = []
+        if include_environment and not use_admin_raster:
+            try:
+                env_points, env_nodes_used, env_pairs = _collect_env_xy_points(
+                    con, max_points=max(4000, min(RTAB_MAP_ENV_MAX_POINTS, 400000))
+                )
+            except (sqlite3.Error, struct.error, zlib.error, MemoryError):
+                env_points = []
 
         xs = [p[0] for p in positions.values()]
         ys = [p[1] for p in positions.values()]
@@ -516,7 +567,7 @@ def build_rtab_graph_json(
         env_raster_png_b64 = ""
         env_raster_source = ""
         if include_environment and include_raster:
-            if opt_surface:
+            if use_admin_raster and opt_surface:
                 try:
                     cw_r, ch_r, grey, _ob = opt_surface
                     png_bytes = _png_grey8(cw_r, ch_r, grey)
@@ -526,7 +577,7 @@ def build_rtab_graph_json(
                     env_raster_source = "admin_opt_map"
                     env_points = []
                     env_pairs = 0
-                    env_nodes_used = len(opt_by_id)
+                    env_nodes_used = len(positions)
                 except (ValueError, MemoryError, zlib.error, OSError):
                     env_raster_source = ""
             elif env_points:
@@ -562,6 +613,7 @@ def build_rtab_graph_json(
             "env_raster_png_b64": env_raster_png_b64,
             "env_raster_source": env_raster_source,
             "opt_map_bounds": opt_map_bounds,
+            "optimized_graph_only": use_admin_raster,
         }
     except sqlite3.Error as exc:
         return {
@@ -579,6 +631,7 @@ def build_rtab_graph_json(
             "env_raster_png_b64": "",
             "env_raster_source": "",
             "opt_map_bounds": None,
+            "optimized_graph_only": False,
         }
     finally:
         if con is not None:

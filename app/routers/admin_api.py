@@ -91,6 +91,10 @@ async def admin_rtab_map_graph(
         1,
         description="1 = PNG raster (payload nhỏ, tường rõ), 0 = trả env_points JSON (debug, nặng)",
     ),
+    use_opt_map: int = Query(
+        1,
+        description="1 = nếu DB có Admin.opt_map + opt_poses: graph + PNG cùng khung tối ưu (Graph View). 0 = luôn dùng toàn bộ Node.pose + ghép laser (debug / DB chưa tối ưu).",
+    ),
 ):
     """Graph RTAB-Map cho Admin Tracking; môi trường mặc định là PNG raster."""
     require_admin(request)
@@ -98,6 +102,7 @@ async def admin_rtab_map_graph(
         content=build_rtab_graph_json(
             include_environment=(env != 0),
             include_raster=(raster != 0),
+            prefer_admin_opt_map=(use_opt_map != 0),
         )
     )
 
