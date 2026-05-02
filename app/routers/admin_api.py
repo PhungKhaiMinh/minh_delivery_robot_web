@@ -22,6 +22,12 @@ from app.config import (
     ROBOT_STATUS_UGV_TOPICS,
     MQTT_TOPIC_GPS_BASE,
 )
+from app.services.admin_settings_store import (
+    get_can_last_params,
+    get_los_last_params,
+    set_can_last_params,
+    set_los_last_params,
+)
 from app.services.auth_service import require_admin
 from app.services.booking_service import get_admin_queue_bookings
 from app.services.pathfinding_service import (
@@ -32,6 +38,7 @@ from app.services.pathfinding_service import (
     get_campus_gps_origin,
 )
 from app.services.mqtt_client import mqtt_service
+from app.services.pickup_locations_store import list_pickup_locations_admin, set_pickup_xy_overrides
 
 router = APIRouter(prefix="/api/admin", tags=["Admin API"])
 
@@ -106,6 +113,93 @@ async def admin_booking_routes(request: Request):
             "coords": coords,
         })
     return JSONResponse(content={"success": True, "routes": routes})
+
+
+@router.get("/settings/los-last")
+async def admin_get_los_last(request: Request):
+    """Tham số LOS đã gửi MQTT lần gần nhất (Firestore hoặc DB local)."""
+    require_admin(request)
+    return JSONResponse(content={"success": True, "params": get_los_last_params()})
+
+
+@router.post("/settings/los-last")
+async def admin_save_los_last(request: Request):
+    """Lưu snapshot payload LOS vừa publish (chỉ key trong allowlist)."""
+    require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    raw = body.get("params")
+    if not isinstance(raw, dict):
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": "Thiếu hoặc sai kiểu trường params (object)."},
+        )
+    if not set_los_last_params(raw):
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": "Lưu thất bại."},
+        )
+    return JSONResponse(content={"success": True, "params": get_los_last_params()})
+
+
+@router.get("/settings/can-last")
+async def admin_get_can_last(request: Request):
+    """Tham số CAN đã gửi MQTT lần gần nhất (Firestore hoặc DB local)."""
+    require_admin(request)
+    return JSONResponse(content={"success": True, "params": get_can_last_params()})
+
+
+@router.post("/settings/can-last")
+async def admin_save_can_last(request: Request):
+    """Lưu snapshot payload CAN vừa publish (chỉ key trong allowlist)."""
+    require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    raw = body.get("params")
+    if not isinstance(raw, dict):
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": "Thiếu hoặc sai kiểu trường params (object)."},
+        )
+    if not set_can_last_params(raw):
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": "Lưu thất bại."},
+        )
+    return JSONResponse(content={"success": True, "params": get_can_last_params()})
+
+
+@router.get("/pickup-locations")
+async def admin_get_pickup_locations(request: Request):
+    """Địa điểm nhận sách + tọa độ local (x, y) mặc định từ GPS và ghi đè (nếu có)."""
+    require_admin(request)
+    return JSONResponse(content={"success": True, "locations": list_pickup_locations_admin()})
+
+
+@router.put("/pickup-locations/overrides")
+async def admin_put_pickup_xy_overrides(request: Request):
+    """Thay thế toàn bộ map ghi đè x,y (met, Bắc/Đông) cho từng địa điểm nhận sách."""
+    require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    raw = body.get("overrides")
+    if not isinstance(raw, dict):
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "message": "Thiếu hoặc sai kiểu trường overrides (object)."},
+        )
+    if not set_pickup_xy_overrides(raw):
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": "Lưu thất bại."},
+        )
+    return JSONResponse(content={"success": True, "locations": list_pickup_locations_admin()})
 
 
 # ---------------------------------------------------------------------------

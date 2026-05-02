@@ -229,6 +229,65 @@
     </div>
 </div>
 
+<textarea id="pickup-locations-boot" class="hidden" aria-hidden="true">{{ pickup_locations_for_admin|tojson }}</textarea>
+<div class="max-w-7xl mx-auto mt-8 space-y-3" x-data="pickupLocationsEditor()">
+    <div>
+        <h2 class="text-xl font-bold text-slate-900">Địa điểm nhận sách — tọa độ local (x, y)</h2>
+        <p class="text-sm text-slate-500 mt-1">
+            Chỉnh (x, y) theo mét (Bắc / Đông), cùng hệ với <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x</code> / <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y</code>.
+            Mặc định tính từ lat/lon và gốc GPS hiện tại của server; có thể ghi đè để dùng trong kịch bản tùy chỉnh bên dưới.
+            Lộ trình đơn hàng qua đồ thị Dijkstra vẫn dựa trên waypoint GPS — bảng này phục vụ đích tự do trên MQTT.
+        </p>
+    </div>
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead class="text-xs text-slate-500 bg-slate-50 border-b border-slate-200">
+                    <tr>
+                        <th class="px-3 py-2 text-left font-medium">Địa điểm</th>
+                        <th class="px-3 py-2 text-right font-medium">Lat</th>
+                        <th class="px-3 py-2 text-right font-medium">Lon</th>
+                        <th class="px-3 py-2 text-right font-medium">X (m)</th>
+                        <th class="px-3 py-2 text-right font-medium">Y (m)</th>
+                        <th class="px-3 py-2 text-left font-medium"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    <template x-for="(r, i) in rows" :key="r.id">
+                        <tr :class="r.overridden ? 'bg-amber-50/50' : ''">
+                            <td class="px-3 py-2 font-medium text-slate-800" x-text="r.name"></td>
+                            <td class="px-3 py-2 text-right font-mono text-xs text-slate-600" x-text="fmtCoord(r.lat)"></td>
+                            <td class="px-3 py-2 text-right font-mono text-xs text-slate-600" x-text="fmtCoord(r.lng)"></td>
+                            <td class="px-3 py-2">
+                                <input type="text" inputmode="decimal" x-model="r.xStr" spellcheck="false"
+                                    class="w-full min-w-[6.5rem] max-w-[10rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
+                            </td>
+                            <td class="px-3 py-2">
+                                <input type="text" inputmode="decimal" x-model="r.yStr" spellcheck="false"
+                                    class="w-full min-w-[6.5rem] max-w-[10rem] ml-auto block px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-mono text-right focus:ring-2 focus:ring-sky-500" />
+                            </td>
+                            <td class="px-3 py-2">
+                                <button type="button" @click="resetRow(i)"
+                                    class="text-xs font-semibold text-sky-700 hover:underline whitespace-nowrap">Từ GPS</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+            <button type="button" @click="save()"
+                :disabled="saving"
+                class="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50">
+                <span x-show="!saving">Lưu tọa độ</span>
+                <span x-show="saving">Đang lưu…</span>
+            </button>
+            <span class="text-xs text-emerald-700 font-medium" x-show="saveMsg" x-text="saveMsg"></span>
+            <span class="text-xs text-red-600" x-show="saveErr" x-text="saveErr"></span>
+        </div>
+    </div>
+</div>
+
 <!-- ═══════════════ TEST SCENARIOS ═══════════════ -->
 {% set orders_test_cfg = {
     "wsUrl": mqtt_ws_url,
@@ -317,7 +376,7 @@
                         <span class="w-3 h-3 rounded-full bg-violet-500"></span>
                         Kịch bản tùy chỉnh
                     </h3>
-                    <p class="text-xs text-slate-500 mt-1">Nhập từ 2 điểm trở lên. (x, y) là mét, trùng <code class="text-violet-800">stage_x</code> / <code class="text-violet-800">stage_y</code>. Bản nháp lưu trên trình duyệt. Nút <strong>Pose</strong>: lấy trực tiếp x, y từ <code class="text-violet-800">UGV/localization/pose</code> (và gán điểm chọn tương ứng).</p>
+                    <p class="text-xs text-slate-500 mt-1">Nhập từ 2 điểm trở lên. (x, y) là mét, trùng <code class="text-violet-800">stage_x</code> / <code class="text-violet-800">stage_y</code>. Bản nháp lưu trên trình duyệt. Nút <strong>Pose</strong>: lấy trực tiếp x, y từ <code class="text-violet-800">UGV/localization/pose</code>. Có thể gán nhanh từ <strong>địa điểm nhận sách</strong> (bảng phía trên) vào một điểm lộ trình.</p>
                 </div>
                 <button type="button"
                     @click="dispatchCustom()"
@@ -341,6 +400,30 @@
                 </button>
                 <span class="text-xs text-slate-400">Tối đa 20 điểm</span>
             </div>
+
+            <div class="flex flex-wrap items-center gap-2 p-3 rounded-xl border border-violet-100 bg-white">
+                <span class="text-xs font-semibold text-slate-700 shrink-0">Điểm đến từ địa điểm nhận sách</span>
+                <select x-model="pickupInjectLocId"
+                    class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white min-w-[10rem]">
+                    <option value="">— Chọn địa điểm —</option>
+                    <template x-for="loc in pickupLocations" :key="loc.id">
+                        <option :value="loc.id" x-text="loc.name + (loc.overridden ? ' *' : '')"></option>
+                    </template>
+                </select>
+                <span class="text-xs text-slate-500">→</span>
+                <select x-model.number="pickupInjectRowIdx"
+                    class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white min-w-[7rem]">
+                    <template x-for="(pt, idx) in customPoints" :key="pt._k">
+                        <option :value="idx" x-text="'Điểm ' + (idx + 1)"></option>
+                    </template>
+                </select>
+                <button type="button" @click="injectPickupWaypoint()"
+                    class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-700 text-white hover:bg-violet-800 shrink-0">
+                    Gán x, y vào điểm
+                </button>
+            </div>
+            <p class="text-[11px] text-slate-500 -mt-2"><span class="text-amber-700 font-medium">*</span> = đã chỉnh x,y ở bảng địa điểm nhận sách (không chỉ GPS).</p>
+            <p class="text-[11px] text-red-600 min-h-[1rem]" x-show="pickupInjectMsg" x-text="pickupInjectMsg"></p>
 
             <div class="rounded-xl border border-violet-200 bg-violet-50/60 p-3 space-y-2">
                 <p class="text-xs font-semibold text-violet-900">Pose mới nhất — <span class="font-mono text-violet-800">UGV/localization/pose</span></p>
@@ -686,6 +769,114 @@ window._doDeleteOrder = async function (id) {
 </script>
 <script>
 (function () {
+    function readPickupLocationsBoot() {
+        try {
+            var el = document.getElementById('pickup-locations-boot');
+            if (el && el.value) return JSON.parse(el.value);
+        } catch (e) { /* ignore */ }
+        return [];
+    }
+
+    function mapLocToRow(loc) {
+        var dx = loc.default_x != null ? loc.default_x : loc.x;
+        var dy = loc.default_y != null ? loc.default_y : loc.y;
+        return {
+            id: loc.id,
+            name: loc.name,
+            lat: loc.lat,
+            lng: loc.lng,
+            default_x: dx,
+            default_y: dy,
+            overridden: !!loc.overridden,
+            xStr: loc.x != null ? String(Number(loc.x).toFixed(4)) : '',
+            yStr: loc.y != null ? String(Number(loc.y).toFixed(4)) : '',
+        };
+    }
+
+    function pickupLocationsEditor() {
+        return {
+            rows: [],
+            saving: false,
+            saveMsg: '',
+            saveErr: '',
+
+            fmtCoord(v) {
+                if (v == null || v === '') return '—';
+                var n = Number(v);
+                if (!Number.isFinite(n)) return String(v);
+                return n.toFixed(7);
+            },
+
+            init() {
+                var initial = readPickupLocationsBoot();
+                this.rows = (Array.isArray(initial) ? initial : []).map(mapLocToRow);
+            },
+
+            resetRow(i) {
+                var r = this.rows[i];
+                if (!r) return;
+                r.xStr = Number(r.default_x).toFixed(4);
+                r.yStr = Number(r.default_y).toFixed(4);
+            },
+
+            syncBootFromRows(list) {
+                try {
+                    var el = document.getElementById('pickup-locations-boot');
+                    if (el) el.value = JSON.stringify(list);
+                } catch (e) { /* ignore */ }
+            },
+
+            async save() {
+                this.saveMsg = '';
+                this.saveErr = '';
+                var tol = 1e-3;
+                var overrides = {};
+                for (var i = 0; i < this.rows.length; i++) {
+                    var r = this.rows[i];
+                    var x = parseFloat(String(r.xStr != null ? r.xStr : '').replace(',', '.'));
+                    var y = parseFloat(String(r.yStr != null ? r.yStr : '').replace(',', '.'));
+                    if (Number.isNaN(x) || Number.isNaN(y)) {
+                        this.saveErr = 'Mỗi dòng cần x, y hợp lệ (số).';
+                        return;
+                    }
+                    if (Math.abs(x - r.default_x) > tol || Math.abs(y - r.default_y) > tol) {
+                        overrides[r.id] = { x: x, y: y };
+                    }
+                }
+                this.saving = true;
+                try {
+                    var res = await fetch('/api/admin/pickup-locations/overrides', {
+                        method: 'PUT',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ overrides: overrides }),
+                    });
+                    var data = await res.json().catch(function () { return null; });
+                    if (!res.ok || !data || !data.success) {
+                        this.saveErr = (data && data.message) || 'Lưu thất bại';
+                        return;
+                    }
+                    var locs = data.locations || [];
+                    this.rows = locs.map(mapLocToRow);
+                    this.syncBootFromRows(locs);
+                    this.saveMsg = 'Đã lưu.';
+                    window.dispatchEvent(new CustomEvent('admin-pickup-locations-updated'));
+                    var self = this;
+                    setTimeout(function () { self.saveMsg = ''; }, 3500);
+                } catch (e) {
+                    this.saveErr = 'Lỗi mạng: ' + e.message;
+                } finally {
+                    this.saving = false;
+                }
+            },
+        };
+    }
+
+    window.pickupLocationsEditor = pickupLocationsEditor;
+})();
+</script>
+<script>
+(function () {
     var CUSTOM_DRAFT_LS = 'admin_orders_custom_waypoints_draft';
     var _wpId = 0;
 
@@ -702,6 +893,14 @@ window._doDeleteOrder = async function (id) {
             if (v != null && v !== '' && !Number.isNaN(Number(v))) return Number(v);
         }
         return null;
+    }
+
+    function readPickupLocationsBoot() {
+        try {
+            var el = document.getElementById('pickup-locations-boot');
+            if (el && el.value) return JSON.parse(el.value);
+        } catch (e) { /* ignore */ }
+        return [];
     }
 
     function testScenarios(cfg) {
@@ -723,6 +922,10 @@ window._doDeleteOrder = async function (id) {
             poseLiveYaw: null,
             poseTargetIndex: 0,
             _poseClient: null,
+            pickupLocations: [],
+            pickupInjectLocId: '',
+            pickupInjectRowIdx: 0,
+            pickupInjectMsg: '',
 
             get poseLiveSummary() {
                 if (this.poseLiveX == null || this.poseLiveY == null) return '—';
@@ -758,8 +961,50 @@ window._doDeleteOrder = async function (id) {
                 this.applyPoseToRow(i);
             },
 
+            reloadPickupLocations() {
+                this.pickupLocations = readPickupLocationsBoot();
+            },
+
+            injectPickupWaypoint() {
+                this.pickupInjectMsg = '';
+                var lid = String(this.pickupInjectLocId || '').trim();
+                if (!lid) {
+                    this.pickupInjectMsg = 'Chọn một địa điểm nhận sách.';
+                    return;
+                }
+                var idx = parseInt(this.pickupInjectRowIdx, 10);
+                if (Number.isNaN(idx) || idx < 0 || idx >= this.customPoints.length) {
+                    this.pickupInjectMsg = 'Chọn điểm lộ trình hợp lệ.';
+                    return;
+                }
+                var loc = null;
+                for (var i = 0; i < this.pickupLocations.length; i++) {
+                    if (String(this.pickupLocations[i].id) === lid) {
+                        loc = this.pickupLocations[i];
+                        break;
+                    }
+                }
+                if (!loc) {
+                    this.pickupInjectMsg = 'Không tìm thấy địa điểm (thử làm mới trang).';
+                    return;
+                }
+                var x = Number(loc.x);
+                var y = Number(loc.y);
+                if (!Number.isFinite(x) || !Number.isFinite(y)) {
+                    this.pickupInjectMsg = 'Tọa độ không hợp lệ.';
+                    return;
+                }
+                this.customPoints[idx].x = x.toFixed(4);
+                this.customPoints[idx].y = y.toFixed(4);
+                this.saveDraft();
+            },
+
             init() {
                 var self = this;
+                this.pickupLocations = readPickupLocationsBoot();
+                window.addEventListener('admin-pickup-locations-updated', function () {
+                    self.reloadPickupLocations();
+                });
                 var loaded = false;
                 try {
                     var raw = localStorage.getItem(CUSTOM_DRAFT_LS);
@@ -841,6 +1086,9 @@ window._doDeleteOrder = async function (id) {
                 this.customPoints.splice(idx, 1);
                 if (this.poseTargetIndex >= this.customPoints.length) {
                     this.poseTargetIndex = Math.max(0, this.customPoints.length - 1);
+                }
+                if (this.pickupInjectRowIdx >= this.customPoints.length) {
+                    this.pickupInjectRowIdx = Math.max(0, this.customPoints.length - 1);
                 }
                 this.saveDraft();
             },

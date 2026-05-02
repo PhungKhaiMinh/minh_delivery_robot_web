@@ -10,6 +10,8 @@
     "topicVel": "UGV/Control",
     "topicParaLos": "UGV/para/los",
     "topicParaCan": "UGV/para/can",
+    "losSaved": los_saved,
+    "canSaved": can_saved,
 } %}
 <div class="max-w-4xl mx-auto space-y-8" x-data='adminSettings({{ settings_cfg|tojson }})'>
     <div>
@@ -169,12 +171,17 @@
         <p class="text-xs text-slate-500">
             Gửi JSON lên <code class="bg-slate-200 px-1 rounded" x-text="topicParaLos"></code>.
             Chỉ các ô có nhập giá trị mới được đưa vào payload.
+            Khi gửi MQTT thành công, server lưu đúng payload đó (Firestore hoặc DB local) để lần sau mở trang sẽ điền sẵn các giá trị từ lần gửi gần nhất.
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <label class="block"><span class="text-xs font-medium text-slate-600">MAX_Linear</span>
                 <input type="text" inputmode="decimal" x-model="losPara.MAX_Linear" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
             <label class="block"><span class="text-xs font-medium text-slate-600">MAX_Angular</span>
                 <input type="text" inputmode="decimal" x-model="losPara.MAX_Angular" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">Accel_Linear</span>
+                <input type="text" inputmode="decimal" x-model="losPara.Accel_Linear" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
+            <label class="block"><span class="text-xs font-medium text-slate-600">Accel_Angular</span>
+                <input type="text" inputmode="decimal" x-model="losPara.Accel_Angular" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
             <label class="block"><span class="text-xs font-medium text-slate-600">MAX_Pulse</span>
                 <input type="text" inputmode="decimal" x-model="losPara.MAX_Pulse" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-cyan-500" spellcheck="false" /></label>
             <label class="block"><span class="text-xs font-medium text-slate-600">Period_Control_guidance</span>
@@ -215,6 +222,7 @@
         <p class="text-xs text-slate-500">
             Gửi JSON lên <code class="bg-slate-200 px-1 rounded" x-text="topicParaCan"></code>.
             Chỉ các ô có nhập giá trị mới được đưa vào payload.
+            Khi gửi MQTT thành công, server lưu đúng payload đó (Firestore hoặc DB local) để lần sau mở trang sẽ điền sẵn các giá trị từ lần gửi gần nhất.
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-3xl">
             <label class="block"><span class="text-xs font-medium text-slate-600">LoopSerialCan</span>
@@ -250,7 +258,7 @@
 }
 
 <span class="text-slate-400">// UGV/para/los (chỉ gửi key đã nhập)</span>
-{ "MAX_Linear": 1.2, "PID_Kp": 0.5 }
+{ "MAX_Linear": 1.2, "Accel_Linear": 0.3, "Accel_Angular": 0.2, "PID_Kp": 0.5 }
 
 <span class="text-slate-400">// UGV/para/can</span>
 { "LoopSerialCan": 10, "LoopSendVel": 20, "safe_angle": 0.1, "safe_distance": 1.5, "loop_calib_yaw": 0.02 }</pre>
@@ -286,6 +294,8 @@ function adminSettings(cfg) {
     var topicVel = cfg.topicVel || 'UGV/Control';
     var topicParaLos = cfg.topicParaLos || 'UGV/para/los';
     var topicParaCan = cfg.topicParaCan || 'UGV/para/can';
+    var losSaved = cfg.losSaved;
+    var canSaved = cfg.canSaved;
 
     function buildParaPayload(obj) {
         var out = {};
@@ -307,6 +317,8 @@ function adminSettings(cfg) {
         losPara: {
             MAX_Linear: '',
             MAX_Angular: '',
+            Accel_Linear: '',
+            Accel_Angular: '',
             MAX_Pulse: '',
             Period_Control_guidance: '',
             Period_Guidance: '',
@@ -368,8 +380,36 @@ function adminSettings(cfg) {
             return Math.max(1, Math.round(this._maxControlSpeed() / 2));
         },
 
+        _applyLosSaved(saved) {
+            if (saved == null || typeof saved !== 'object') return;
+            var self = this;
+            Object.keys(self.losPara).forEach(function (k) {
+                self.losPara[k] = '';
+            });
+            Object.keys(saved).forEach(function (k) {
+                if (!Object.prototype.hasOwnProperty.call(self.losPara, k)) return;
+                var v = saved[k];
+                self.losPara[k] = v != null && v !== '' ? String(v) : '';
+            });
+        },
+
+        _applyCanSaved(saved) {
+            if (saved == null || typeof saved !== 'object') return;
+            var self = this;
+            Object.keys(self.canPara).forEach(function (k) {
+                self.canPara[k] = '';
+            });
+            Object.keys(saved).forEach(function (k) {
+                if (!Object.prototype.hasOwnProperty.call(self.canPara, k)) return;
+                var v = saved[k];
+                self.canPara[k] = v != null && v !== '' ? String(v) : '';
+            });
+        },
+
         init() {
             var self = this;
+            this._applyLosSaved(losSaved);
+            this._applyCanSaved(canSaved);
             this._client = window.AdminMqtt.connect(wsUrl, clientPrefix, function (state, detail) {
                 self.conn = state;
                 self.publishError = detail || '';
@@ -634,6 +674,17 @@ function adminSettings(cfg) {
                         self.losError = err.message || 'Publish thất bại';
                     } else {
                         self.losOk = 'Đã gửi → ' + topicParaLos + ': ' + body;
+                        fetch('/api/admin/settings/los-last', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ params: payload }),
+                        })
+                            .then(function (r) { return r.json().catch(function () { return null; }); })
+                            .then(function (data) {
+                                if (data && data.success && data.params) self._applyLosSaved(data.params);
+                            })
+                            .catch(function () {});
                     }
                 });
             } catch (e) {
@@ -662,6 +713,17 @@ function adminSettings(cfg) {
                         self.canError = err.message || 'Publish thất bại';
                     } else {
                         self.canOk = 'Đã gửi → ' + topicParaCan + ': ' + body;
+                        fetch('/api/admin/settings/can-last', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ params: payload }),
+                        })
+                            .then(function (r) { return r.json().catch(function () { return null; }); })
+                            .then(function (data) {
+                                if (data && data.success && data.params) self._applyCanSaved(data.params);
+                            })
+                            .catch(function () {});
                     }
                 });
             } catch (e) {
