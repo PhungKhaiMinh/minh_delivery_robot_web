@@ -31,6 +31,7 @@ from app.config import (
     RTAB_MAP_ENV_RASTER_MAX_SIDE,
     RTAB_MAP_OPT_MAP_MAX_PIXELS,
     RTAB_MAP_OPT_MAP_MAX_SIDE,
+    RTAB_MAP_OPT_MAP_INVERT_GREY,
 )
 
 
@@ -217,7 +218,7 @@ def _grey_dilate_max(grey: bytes, cw: int, ch: int, neighbor_sub: int = 8) -> by
     return bytes(out)
 
 
-# opt_map trong DB: hàng OpenCV tăng theo y; Leaflet NW = wy lớn — nếu lệch dọc, thử đổi cờ này.
+# opt_map trong DB: hàng OpenCV tăng theo y; Leaflet ImageOverlay + bounds NW/SE — nếu lệch dọc, thử đổi cờ này.
 _OPT_MAP_FLIP_ROWS_FOR_LEAFLET = True
 
 
@@ -264,6 +265,8 @@ def _try_load_admin_opt_map_surface(
     grey_b = bytes(grey)
     sc = _opt_map_upscale_factor(n_cols, n_rows)
     nw, nh, grey_b = _nearest_upscale_grey8(grey_b, n_cols, n_rows, sc)
+    if RTAB_MAP_OPT_MAP_INVERT_GREY:
+        grey_b = bytes(255 - v for v in grey_b)
     return nw, nh, grey_b, bmap
 
 

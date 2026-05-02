@@ -4,16 +4,15 @@
 {% block admin_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 <style>
-#admin-map { min-height: 560px; border-radius: 1rem; z-index: 1; background: #08080a; }
-/* Occupancy: nền tối + tường sáng, pixel sắc khi zoom (gần Graph View Qt) */
+#admin-map { min-height: 560px; border-radius: 1rem; z-index: 1; background: #eceff1; }
 .leaflet-image-layer.rtab-env-raster {
     mix-blend-mode: normal;
     opacity: 1;
     image-rendering: pixelated;
     image-rendering: crisp-edges;
-    filter: contrast(1.08) brightness(1.06) saturate(0.88);
+    filter: contrast(1.05) brightness(1.02);
 }
-.leaflet-container { background: #08080a; }
+.leaflet-container { background: #eceff1; }
 </style>
 {% endblock %}
 
@@ -220,10 +219,10 @@
                 if (graph.env_raster_png_b64 && graph.env_raster_w > 0) {
                     if (graph.opt_map_bounds) {
                         var ob = graph.opt_map_bounds;
-                        rasterBounds = L.latLngBounds(
-                            worldToMapLatLng(ob.xmin, ob.ymin, b),
-                            worldToMapLatLng(ob.xmax, ob.ymax, b)
-                        );
+                        /* NW world = (xmin, ymax), SE = (xmax, ymin) — khớp trục lat = ymax - wy (Leaflet CRS.Simple). */
+                        var nwCorner = worldToMapLatLng(ob.xmin, ob.ymax, b);
+                        var seCorner = worldToMapLatLng(ob.xmax, ob.ymin, b);
+                        rasterBounds = L.latLngBounds(nwCorner, seCorner);
                     } else {
                         rasterBounds = L.latLngBounds(L.latLng(h, 0), L.latLng(0, w));
                     }

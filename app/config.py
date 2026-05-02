@@ -195,6 +195,8 @@ RTAB_MAP_ENV_RASTER_MAX_SIDE = int(os.getenv("RTAB_MAP_ENV_RASTER_MAX_SIDE", "24
 # Admin.opt_map: upscale nearest-neighbor (cùng mét / pixel gốc) để zoom web sắc như Graph View
 RTAB_MAP_OPT_MAP_MAX_SIDE = int(os.getenv("RTAB_MAP_OPT_MAP_MAX_SIDE", "4096"))
 RTAB_MAP_OPT_MAP_MAX_PIXELS = int(os.getenv("RTAB_MAP_OPT_MAP_MAX_PIXELS", str(6_000_000)))
+# 1 = đảo sáng/tối PNG opt_map (tường đen trên nền trắng); 0 = giữ palette cũ
+RTAB_MAP_OPT_MAP_INVERT_GREY = os.getenv("RTAB_MAP_OPT_MAP_INVERT_GREY", "1").strip().lower() not in ("0", "false", "no")
 
 # === MQTT topic gửi waypoints cho robot di chuyển ===
 MQTT_TOPIC_PATH = os.getenv("MQTT_TOPIC_PATH", "UGV/path_topic")
