@@ -1,13 +1,13 @@
 """
-Hoạch định lộ trình test: điểm đầu / cuối = địa điểm nhận sách (tọa center x,y),
-các đỉnh trung gian = waypoint robot (center).
+Hoạch định lộ trình test: điểm đầu / cuối = địa điểm nhận sách (pickup, center x,y);
+đỉnh trung gian = waypoint (center / right_side).
 
-- Cạnh waypoint–waypoint: do admin nối trên Tracking (đường robot được phép đi).
-- Nối pickup đầu/cuối vào đồ thị: **tự động** tới mọi waypoint là **đầu mút** của ít nhất một cạnh,
-  trọng số = khoảng cách Euclid (m) từ center pickup tới center waypoint (và ngược lại tới đích).
-  Dijkstra chọn cặp vào/ra tối ưu theo **tổng** đường đi ngắn nhất.
+Đồ thị do admin định nghĩa trên Tracking:
+  - Cạnh **waypoint–waypoint** (trọng số Euclid mét giữa center).
+  - Cạnh **pickup ↔ waypoint** (`pickup_portal_edges`, trọng số Euclid pickup–center WP).
 
-Không có cạnh trực tiếp điểm đầu → điểm cuối.
+Pickup được coi như đỉnh trên cùng mạng: chỉ đi được qua các cạnh đã khai báo.
+Dijkstra trên đồ thị vô hướng (mỗi cạnh thêm hai chiều) tìm đường ngắn nhất giữa hai pickup.
 
 Kết quả: stage_x/y = center, stage_x_margin/y_margin = right_side (waypoint) hoặc margin (pickup).
 """
@@ -26,26 +26,23 @@ def _euclid(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def _dijkstra_sparse(
-    adj: List[List[Tuple[int, float]]],
-    src: int,
-    dst: int,
-) -> Optional[List[int]]:
-    n = len(adj)
-    if src < 0 or src >= n or dst < 0 or dst >= n:
-        return None
+def _dijkstra_str(
+    adj: Dict[str, List[Tuple[str, float]]],
+    src: str,
+    dst: str,
+) -> Optional[List[str]]:
     if src == dst:
         return [src]
-    dist: Dict[int, float] = {src: 0.0}
-    prev: Dict[int, int] = {}
-    pq: List[Tuple[float, int]] = [(0.0, src)]
+    dist: Dict[str, float] = {src: 0.0}
+    prev: Dict[str, str] = {}
+    pq: List[Tuple[float, str]] = [(0.0, src)]
     while pq:
         d, u = heapq.heappop(pq)
         if d > dist.get(u, math.inf):
             continue
         if u == dst:
             break
-        for v, w in adj[u]:
+        for v, w in adj.get(u, []):
             nd = d + w
             if nd < dist.get(v, math.inf):
                 dist[v] = nd
@@ -53,7 +50,7 @@ def _dijkstra_sparse(
                 heapq.heappush(pq, (nd, v))
     if dst not in dist:
         return None
-    path: List[int] = []
+    path: List[str] = []
     cur = dst
     while cur != src:
         path.append(cur)
@@ -61,6 +58,13 @@ def _dijkstra_sparse(
     path.append(src)
     path.reverse()
     return path
+
+
+def _add_undirected(adj: Dict[str, List[Tuple[str, float]]], u: str, v: str, weight: float) -> None:
+    if not math.isfinite(weight) or weight <= 0:
+        return
+    adj.setdefault(u, []).append((v, weight))
+    adj.setdefault(v, []).append((u, weight))
 
 
 def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[str, Any]]:
@@ -82,119 +86,101 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
     bundle = get_waypoints_bundle()
     wps = bundle.get("waypoints") or []
     edges = bundle.get("edges") or []
+    portals = bundle.get("pickup_portal_edges") or []
 
     if not wps:
         return None
 
-    # Chỉ các waypoint có center/right_side hợp lệ (đã lọc bởi store)
     wp_list: List[Dict[str, Any]] = list(wps)
-    wp_ids = [str(w["id"]) for w in wp_list]
     id_to_wp = {str(w["id"]): w for w in wp_list}
-    w = len(wp_ids)
-    if w == 0:
-        return None
 
-    # Chỉ số: 0 = start pickup, 1..w = waypoint theo thứ tự wp_list, w+1 = end pickup
-    SRC = 0
-    DST = w + 1
-    n = w + 2
-    adj: List[List[Tuple[int, float]]] = [[] for _ in range(n)]
-
-    def wp_index(wid: str) -> int:
-        return 1 + wp_ids.index(wid)
-
-    def center_xy(meta: Dict[str, Any]) -> Optional[Tuple[float, float]]:
+    def center_xy_wp(meta: Dict[str, Any]) -> Optional[Tuple[float, float]]:
         c = meta.get("center") or {}
         try:
             return (float(c["x"]), float(c["y"]))
         except (KeyError, TypeError, ValueError):
             return None
 
-    def add_edge(u: int, v: int, d: float) -> None:
-        if not math.isfinite(d) or d <= 0:
-            return
-        adj[u].append((v, d))
-        adj[v].append((u, d))
+    def pickup_xy(p: Dict[str, Any]) -> Optional[Tuple[float, float]]:
+        try:
+            return (float(p["x"]), float(p["y"]))
+        except (KeyError, TypeError, ValueError):
+            return None
 
-    # Cạnh waypoint–waypoint + thu thập đỉnh thuộc đồ thị (đầu mút cạnh user)
-    wp_on_graph: set[str] = set()
+    adj: Dict[str, List[Tuple[str, float]]] = {}
+
     for pair in edges:
         if not isinstance(pair, (list, tuple)) or len(pair) != 2:
             continue
         a, b = str(pair[0]), str(pair[1])
         if a not in id_to_wp or b not in id_to_wp:
             continue
-        pa = center_xy(id_to_wp[a])
-        pb = center_xy(id_to_wp[b])
+        pa = center_xy_wp(id_to_wp[a])
+        pb = center_xy_wp(id_to_wp[b])
         if pa is None or pb is None:
             continue
-        wp_on_graph.add(a)
-        wp_on_graph.add(b)
-        ia, ib = wp_index(a), wp_index(b)
-        add_edge(ia, ib, _euclid(pa, pb))
+        _add_undirected(adj, a, b, _euclid(pa, pb))
 
-    if not wp_on_graph:
+    for pr in portals:
+        if not isinstance(pr, dict):
+            continue
+        pid = str(pr.get("pickup_id", "")).strip()
+        wid = str(pr.get("waypoint_id", "")).strip()
+        if pid not in by_pid or wid not in id_to_wp:
+            continue
+        pp = pickup_xy(by_pid[pid])
+        pw = center_xy_wp(id_to_wp[wid])
+        if pp is None or pw is None:
+            continue
+        _add_undirected(adj, pid, wid, _euclid(pp, pw))
+
+    if not adj:
         return None
 
-    sp = by_pid[sid]
-    ep = by_pid[eid]
-    start_pt = (float(sp["x"]), float(sp["y"]))
-    end_pt = (float(ep["x"]), float(ep["y"]))
-
-    for wid in wp_on_graph:
-        wpt = id_to_wp.get(wid)
-        if wpt is None:
-            continue
-        wc = center_xy(wpt)
-        if wc is None:
-            continue
-        wi = wp_index(wid)
-        add_edge(SRC, wi, _euclid(start_pt, wc))
-        add_edge(wi, DST, _euclid(wc, end_pt))
-
-    path_idx = _dijkstra_sparse(adj, SRC, DST)
-    if path_idx is None:
+    path_ids = _dijkstra_str(adj, sid, eid)
+    if path_ids is None:
         return None
 
-    nodes_meta: List[Dict[str, Any]] = [
-        {
-            "kind": "pickup",
-            "id": sid,
-            "name": sp.get("name", sid),
-            "cx": float(sp["x"]),
-            "cy": float(sp["y"]),
-            "mx": float(sp.get("x_margin", sp["x"])),
-            "my": float(sp.get("y_margin", sp["y"])),
-        }
-    ]
-    for wid in wp_ids:
-        wp = id_to_wp[wid]
-        c = wp.get("center") or {}
-        rs = wp.get("right_side") or {}
-        nodes_meta.append(
-            {
-                "kind": "waypoint",
-                "id": wid,
-                "name": str(wp.get("name", wid)),
-                "cx": float(c["x"]),
-                "cy": float(c["y"]),
-                "mx": float(rs["x"]),
-                "my": float(rs["y"]),
-            }
-        )
-    nodes_meta.append(
-        {
-            "kind": "pickup",
-            "id": eid,
-            "name": ep.get("name", eid),
-            "cx": float(ep["x"]),
-            "cy": float(ep["y"]),
-            "mx": float(ep.get("x_margin", ep["x"])),
-            "my": float(ep.get("y_margin", ep["y"])),
-        }
-    )
+    def node_meta(nid: str) -> Optional[Dict[str, Any]]:
+        if nid in id_to_wp:
+            wp = id_to_wp[nid]
+            c = wp.get("center") or {}
+            rs = wp.get("right_side") or {}
+            try:
+                return {
+                    "kind": "waypoint",
+                    "id": nid,
+                    "name": str(wp.get("name", nid)),
+                    "cx": float(c["x"]),
+                    "cy": float(c["y"]),
+                    "mx": float(rs["x"]),
+                    "my": float(rs["y"]),
+                }
+            except (KeyError, TypeError, ValueError):
+                return None
+        if nid in by_pid:
+            p = by_pid[nid]
+            try:
+                return {
+                    "kind": "pickup",
+                    "id": nid,
+                    "name": p.get("name", nid),
+                    "cx": float(p["x"]),
+                    "cy": float(p["y"]),
+                    "mx": float(p.get("x_margin", p["x"])),
+                    "my": float(p.get("y_margin", p["y"])),
+                }
+            except (KeyError, TypeError, ValueError):
+                return None
+        return None
 
-    ordered_meta = [nodes_meta[i] for i in path_idx]
+    ordered_meta: List[Dict[str, Any]] = []
+    for nid in path_ids:
+        m = node_meta(nid)
+        if m is None:
+            return None
+        ordered_meta.append(m)
+
     ordered_stops: List[Dict[str, Any]] = []
     for st in ordered_meta:
         ordered_stops.append(
@@ -218,12 +204,13 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
         smx.append(st["mx"])
         smy.append(st["my"])
 
-    def edge_len(u: int, v: int) -> float:
-        pu = (nodes_meta[u]["cx"], nodes_meta[u]["cy"])
-        pv = (nodes_meta[v]["cx"], nodes_meta[v]["cy"])
-        return _euclid(pu, pv)
-
-    total_len = sum(edge_len(path_idx[i], path_idx[i + 1]) for i in range(len(path_idx) - 1))
+    total_len = sum(
+        _euclid(
+            (ordered_meta[i]["cx"], ordered_meta[i]["cy"]),
+            (ordered_meta[i + 1]["cx"], ordered_meta[i + 1]["cy"]),
+        )
+        for i in range(len(ordered_meta) - 1)
+    )
 
     return {
         "ordered_stops": ordered_stops,

@@ -1,6 +1,7 @@
 """
 Dataset waypoint robot: mỗi điểm có tên + tọa độ center (x,y) và right_side (x,y) riêng.
-Đồ thị điều hướng: cạnh waypoint–waypoint (lưu Firestore dạng [{u,v}] — không dùng mảng lồng mảng).
+Đồ thị điều hướng: cạnh waypoint–waypoint + cạnh pickup↔waypoint vào mạng (pickup_portal_edges).
+Lưu cạnh WP–WP Firestore dạng [{u,v}] — không dùng mảng lồng mảng.
 Lưu admin_config / robot_waypoints_dataset — Firestore hoặc DB JSON local.
 """
 
@@ -194,9 +195,15 @@ def set_waypoint_traversal_graph(edges_raw: Any, portals_raw: Any) -> tuple[bool
         return (
             False,
             (
-                "Không có cạnh nào hợp lệ: id waypoint trên cạnh không khớp dataset trên server. "
+                "Không có cạnh waypoint–waypoint nào hợp lệ: id trên cạnh không khớp dataset trên server. "
                 "Lưu dataset waypoint ở trang Orders trước, hoặc bấm Lưu đồ thị khi trang đã tải được waypoint từ server."
             ),
+        )
+
+    if isinstance(portals_raw, list) and len(portals_raw) > 0 and len(portals_out) == 0:
+        return (
+            False,
+            "Không có cạnh pickup↔waypoint nào hợp lệ: id pickup hoặc waypoint không khớp catalog / dataset.",
         )
 
     ref = db.collection(ADMIN_CONFIG_COLLECTION).document(WAYPOINT_DATASET_DOC_ID)

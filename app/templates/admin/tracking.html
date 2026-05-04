@@ -75,12 +75,13 @@
             </label>
         </div>
         <p class="text-xs text-violet-800/90 leading-relaxed">
-            <strong>Cạnh waypoint–waypoint:</strong> bật <em>Chế độ nối cạnh</em> → chọn waypoint A → chọn waypoint B (đường tím).
-            Pickup đầu/cuối được hệ thống <strong>tự nối ảo</strong> tới các waypoint trên đồ thị; Dijkstra chọn đường vào/ra ngắn nhất theo tổng quãng đường.
-            Nhấn lại cùng một waypoint để hủy bước chọn. <kbd class="px-1 bg-white rounded border text-[10px]">Esc</kbd> xóa lựa chọn.
+            <strong>Cạnh waypoint–waypoint (tím):</strong> bật <em>Chế độ nối cạnh</em> → chọn waypoint A → waypoint B.<br>
+            <strong>Cạnh pickup ↔ waypoint (cam nét đứt):</strong> pickup được coi như đỉnh trên mạng — chọn pickup rồi waypoint (hoặc ngược lại) để robot chỉ đi vào mạng qua các cạnh bạn nối.
+            Hoạch định đơn test (Orders) chạy Dijkstra trên <strong>tổng đồ thị</strong> đó, không tự nối ảo pickup nữa.
+            Nhấn lại cùng một điểm để hủy bước chọn. <kbd class="px-1 bg-white rounded border text-[10px]">Esc</kbd> xóa lựa chọn.
         </p>
         <p class="text-xs text-violet-700/90 font-medium">
-            Nút <strong>Lưu</strong> luôn bấm được (chỉ khóa khi đang gửi). Có thể lưu chỉ danh sách cạnh; không cần tải pickup.
+            Nút <strong>Lưu</strong> ghi cả cạnh WP–WP và pickup↔waypoint. Tải pickup để vẽ điểm cam và nối portal.
             Điểm tím (waypoint) và cam (pickup) dùng <strong>cùng phép chiếu</strong> với graph RTAB trên map để trùng tọa độ m với PNG/opt_map.
         </p>
         <p class="text-xs font-medium" :class="graphEditMode ? 'text-amber-800' : 'text-slate-500'" x-text="graphHint"></p>
@@ -102,6 +103,13 @@
                 <div class="flex justify-between gap-2 py-0.5 border-b border-slate-100">
                     <span class="font-mono text-[11px]" x-text="e[0]+' ↔ '+e[1]"></span>
                     <button type="button" class="text-red-600 hover:underline" @click="removeEdge(ei)">Xóa</button>
+                </div>
+            </template>
+            <div class="font-semibold text-slate-700 mt-2 mb-1">Cạnh pickup ↔ waypoint (<span x-text="pickupPortalEdges.length"></span>)</div>
+            <template x-for="(pe, pi) in pickupPortalEdges" :key="'p'+pi+pe.pickup_id+pe.waypoint_id">
+                <div class="flex justify-between gap-2 py-0.5 border-b border-slate-100">
+                    <span class="font-mono text-[11px]" x-text="pe.pickup_id+' ↔ '+pe.waypoint_id"></span>
+                    <button type="button" class="text-red-600 hover:underline" @click="removePickupPortal(pi)">Xóa</button>
                 </div>
             </template>
         </div>
@@ -185,6 +193,15 @@
         return worldToMapLatLng(wx, graphDisplayWorldY(wy, bb), bb);
     }
 
+    /** Chuẩn hóa cạnh WP–WP từ API (mảng hoặc {u,v}). */
+    function normalizeWpEdge(x) {
+        if (!x) return null;
+        if (Array.isArray(x) && x.length === 2) return [String(x[0]), String(x[1])];
+        if (typeof x === 'object' && x.u != null && x.v != null) return [String(x.u), String(x.v)];
+        if (typeof x === 'object' && x.from != null && x.to != null) return [String(x.from), String(x.to)];
+        return null;
+    }
+
     function adminTracking(cfg) {
         cfg = cfg || {};
         var topicPose = cfg.topicPose || 'UGV/localization/pose';
@@ -238,6 +255,7 @@
             waypointsRaw: [],
             pickupsRaw: [],
             edges: [],
+            pickupPortalEdges: [],
             pendingFrom: null,
 
             init: function () {
@@ -497,8 +515,8 @@
                 this.pendingFrom = null;
                 this.graphSaveOk = '';
                 this.graphHint = this.graphEditMode
-                    ? 'Chọn waypoint thứ nhất, rồi chọn waypoint thứ hai để tạo cạnh WP–WP (đường tím).'
-                    : 'Tắt chế độ nối — chỉ xem waypoint và cạnh.';
+                    ? 'Chọn waypoint hoặc pickup — waypoint+waypoint = cạnh tím; pickup+waypoint = portal (vào mạng).'
+                    : 'Tắt chế độ nối — chỉ xem waypoint, pickup và cạnh.';
                 this._renderUserGraphLayers();
             },
 
@@ -506,6 +524,13 @@
                 if (!this.graphEditMode) return;
                 wid = String(wid);
                 var pf = this.pendingFrom;
+                if (pf && pf.type === 'pickup') {
+                    this._addPortalEdge(pf.id, wid);
+                    this.pendingFrom = null;
+                    this.graphHint = 'Đã thêm cạnh pickup ↔ waypoint. Tiếp tục hoặc Lưu.';
+                    this._renderUserGraphLayers();
+                    return;
+                }
                 if (pf && pf.type === 'wp') {
                     if (pf.id === wid) {
                         this.pendingFrom = null;
@@ -521,11 +546,53 @@
                         this.pendingFrom = null;
                         this.graphHint = 'Đã thêm cạnh WP–WP. Tiếp tục nối hoặc nhấn Lưu khi xong.';
                     }
-                } else {
-                    this.pendingFrom = { type: 'wp', id: wid };
-                    this.graphHint = 'Đã chọn waypoint — chọn waypoint khác để tạo cạnh.';
+                    this._renderUserGraphLayers();
+                    return;
                 }
+                this.pendingFrom = { type: 'wp', id: wid };
+                this.graphHint = 'Đã chọn waypoint — chọn waypoint khác (WP–WP) hoặc pickup (portal).';
                 this._renderUserGraphLayers();
+            },
+
+            onPickupMarkerClick: function (pid) {
+                if (!this.graphEditMode) return;
+                pid = String(pid);
+                var pf = this.pendingFrom;
+                if (pf && pf.type === 'wp') {
+                    this._addPortalEdge(pid, pf.id);
+                    this.pendingFrom = null;
+                    this.graphHint = 'Đã thêm cạnh pickup ↔ waypoint. Tiếp tục hoặc Lưu.';
+                    this._renderUserGraphLayers();
+                    return;
+                }
+                if (pf && pf.type === 'pickup') {
+                    if (pf.id === pid) {
+                        this.pendingFrom = null;
+                        this.graphHint = 'Đã hủy chọn.';
+                    } else {
+                        this.graphHint = 'Chọn một waypoint để nối pickup này vào mạng.';
+                    }
+                    this._renderUserGraphLayers();
+                    return;
+                }
+                this.pendingFrom = { type: 'pickup', id: pid };
+                this.graphHint = 'Đã chọn pickup — chọn waypoint để tạo portal vào mạng.';
+                this._renderUserGraphLayers();
+            },
+
+            _addPortalEdge: function (pickupId, waypointId) {
+                pickupId = String(pickupId);
+                waypointId = String(waypointId);
+                var dup = this.pickupPortalEdges.some(function (p) {
+                    return String(p.pickup_id) === pickupId && String(p.waypoint_id) === waypointId;
+                });
+                if (dup) {
+                    this.graphHint = 'Cạnh pickup ↔ waypoint đã tồn tại.';
+                    return;
+                }
+                this.pickupPortalEdges = this.pickupPortalEdges.concat([
+                    { pickup_id: pickupId, waypoint_id: waypointId },
+                ]);
             },
 
             removeEdge: function (idx) {
@@ -535,7 +602,12 @@
                 this._renderUserGraphLayers();
             },
 
-            reloadWaypointGraphFromServer: async function () {
+            removePickupPortal: function (idx) {
+                var next = this.pickupPortalEdges.slice();
+                next.splice(idx, 1);
+                this.pickupPortalEdges = next;
+                this._renderUserGraphLayers();
+            },
                 await this._loadWaypointGraphOverlay();
             },
 
@@ -546,7 +618,9 @@
                 try {
                     var payload = {
                         edges: this.edges,
-                        pickup_portal_edges: [],
+                        pickup_portal_edges: (this.pickupPortalEdges || []).map(function (p) {
+                            return { pickup_id: String(p.pickup_id), waypoint_id: String(p.waypoint_id) };
+                        }),
                     };
                     if (this.waypointsRaw && this.waypointsRaw.length > 0) {
                         payload.waypoints = this.waypointsRaw;
@@ -563,7 +637,14 @@
                         throw new Error(det || (j && j.message) || res.statusText || 'Lỗi HTTP');
                     }
                     this.waypointsRaw = j.waypoints || [];
-                    this.edges = (j.edges || []).map(function (x) { return [String(x[0]), String(x[1])]; });
+                    this.edges = (j.edges || []).map(function (x) {
+                        var n = normalizeWpEdge(x);
+                        return n ? n : null;
+                    }).filter(Boolean);
+                    this.pickupPortalEdges = (j.pickup_portal_edges || []).map(function (x) {
+                        if (!x || x.pickup_id == null || x.waypoint_id == null) return null;
+                        return { pickup_id: String(x.pickup_id), waypoint_id: String(x.waypoint_id) };
+                    }).filter(Boolean);
                     this.graphSaveOk = 'Đã lưu đồ thị lên server.';
                     var self = this;
                     setTimeout(function () { self.graphSaveOk = ''; }, 4000);
@@ -592,7 +673,14 @@
                     }
                     if (!dj.success) throw new Error(dj.message || 'waypoints-dataset');
                     self.waypointsRaw = dj.waypoints || [];
-                    self.edges = (dj.edges || []).map(function (x) { return [String(x[0]), String(x[1])]; });
+                    self.edges = (dj.edges || []).map(function (x) {
+                        var n = normalizeWpEdge(x);
+                        return n ? n : null;
+                    }).filter(Boolean);
+                    self.pickupPortalEdges = (dj.pickup_portal_edges || []).map(function (x) {
+                        if (!x || x.pickup_id == null || x.waypoint_id == null) return null;
+                        return { pickup_id: String(x.pickup_id), waypoint_id: String(x.waypoint_id) };
+                    }).filter(Boolean);
                     self.pickupsRaw = (pj && pj.success && Array.isArray(pj.locations)) ? pj.locations : [];
                     self._renderUserGraphLayers();
                 } catch (e) {
@@ -640,6 +728,10 @@
                         );
                     }
                 });
+                var pickupById = {};
+                (this.pickupsRaw || []).forEach(function (p) {
+                    if (p && p.id != null) pickupById[String(p.id)] = p;
+                });
                 (this.edges || []).forEach(function (e) {
                     var wa = wpById[e[0]], wb = wpById[e[1]];
                     if (!wa || !wb || !wa.center || !wb.center) return;
@@ -651,20 +743,46 @@
                         { color: '#7c3aed', weight: 3, opacity: 0.78, lineCap: 'round' }
                     ).addTo(wpEdgeLayer);
                 });
+                (this.pickupPortalEdges || []).forEach(function (pe) {
+                    var pu = pickupById[String(pe.pickup_id)];
+                    var wa = wpById[String(pe.waypoint_id)];
+                    if (!pu || !wa || pu.x == null || pu.y == null || !wa.center) return;
+                    L.polyline(
+                        [
+                            rtabGraphAlignWorldToMapLL(Number(pu.x), Number(pu.y), b),
+                            rtabGraphAlignWorldToMapLL(Number(wa.center.x), Number(wa.center.y), b),
+                        ],
+                        {
+                            color: '#ea580c',
+                            weight: 2.5,
+                            opacity: 0.88,
+                            dashArray: '8,6',
+                            lineCap: 'round',
+                        }
+                    ).addTo(wpEdgeLayer);
+                });
                 (this.pickupsRaw || []).forEach(function (p) {
                     if (p.x == null || p.y == null) return;
                     var pid = String(p.id);
                     var ll = rtabGraphAlignWorldToMapLL(Number(p.x), Number(p.y), b);
-                    L.circleMarker(ll, {
+                    var pm = L.circleMarker(ll, {
                         radius: self.graphEditMode ? 7 : 4,
                         fillColor: '#fdba74',
                         color: '#c2410c',
                         weight: 2,
                         fillOpacity: 0.88,
-                    }).addTo(wpUserLayer).bindPopup(
-                        '<div class="text-xs"><b>' + String(p.name || pid) + '</b><br><span class="font-mono">' + pid +
-                        '</span><br><span class="text-slate-600">x=' + Number(p.x).toFixed(4) + ' y=' + Number(p.y).toFixed(4) + ' m</span></div>'
-                    );
+                    }).addTo(wpUserLayer);
+                    if (self.graphEditMode) {
+                        pm.on('click', function (ev) {
+                            L.DomEvent.stopPropagation(ev);
+                            self.onPickupMarkerClick(pid);
+                        });
+                    } else {
+                        pm.bindPopup(
+                            '<div class="text-xs"><b>' + String(p.name || pid) + '</b><br><span class="font-mono">' + pid +
+                            '</span><br><span class="text-slate-600">x=' + Number(p.x).toFixed(4) + ' y=' + Number(p.y).toFixed(4) + ' m</span></div>'
+                        );
+                    }
                 });
             },
         };
