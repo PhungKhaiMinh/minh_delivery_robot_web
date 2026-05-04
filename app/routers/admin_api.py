@@ -267,7 +267,7 @@ async def admin_put_pickup_xy_overrides(request: Request):
                     "success": False,
                     "message": (
                         "Dữ liệu không hợp lệ: cần ít nhất một địa điểm; id (chữ, số, _,-) tối đa 64 ký tự, "
-                        "tên không rỗng, lat/lon hợp lệ, không trùng id."
+                        "tên không rỗng, tọa độ (lat/lon hoặc local_x/local_y mét) hợp lệ, không trùng id."
                     ),
                 },
             )
@@ -304,8 +304,8 @@ async def admin_test_route_plan(request: Request):
                 "success": False,
                 "message": (
                     "Không hoạch định được: kiểm tra id đầu/cuối khác nhau, catalog pickup, "
-                    "dataset waypoint, và trên Tracking đã có **ít nhất một cạnh** waypoint–waypoint "
-                    "(đồ thị nối được từ điểm đầu tới điểm cuối; Dijkstra tự chọn waypoint vào/ra pickup)."
+                    "dataset waypoint, và trên Tracking đã có **cạnh** waypoint–waypoint + **portal** pickup↔waypoint "
+                    "nối liền hai pickup qua mạng (Dijkstra trên đồ thị đã khai báo)."
                 ),
             },
         )

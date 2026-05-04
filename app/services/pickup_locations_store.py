@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import CAMPUS_LOCATIONS
 from app.services.db_service import db
-from app.services.pathfinding_service import gps_to_local
+from app.services.pathfinding_service import gps_to_local, local_to_gps
 
 ADMIN_CONFIG_COLLECTION = "admin_config"
 PICKUP_CATALOG_DOC_ID = "pickup_locations_catalog"
@@ -23,7 +23,11 @@ _ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 def get_catalog_locations() -> List[Dict[str, Any]]:
-    """Danh sách {id, name, lat, lng} — từ DB hoặc bản sao CAMPUS_LOCATIONS."""
+    """Danh sách {id, name, lat, lng} — từ DB hoặc bản sao CAMPUS_LOCATIONS.
+
+    Khi ghi từ admin chỉ dùng hệ mét: có thể gửi ``local_x``, ``local_y`` (không có lat/lng);
+    hệ thống suy lat/lng nội bộ qua ``local_to_gps`` để tương thích lưu trữ / booking.
+    """
     doc = db.collection(ADMIN_CONFIG_COLLECTION).document(PICKUP_CATALOG_DOC_ID).get()
     if not doc:
         return copy.deepcopy(list(CAMPUS_LOCATIONS))
@@ -47,16 +51,30 @@ def _normalize_catalog_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
     if not name or len(name) > 200:
         return None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     try:
         lat = float(item["lat"])
         lng = float(item["lng"])
     except (KeyError, TypeError, ValueError):
+        lat = lng = None
+    if lat is not None and lng is not None:
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+            return None
+        if not (math.isfinite(lat) and math.isfinite(lng)):
+            return None
+        return {"id": lid, "name": name, "lat": lat, "lng": lng}
+    try:
+        lx = float(item.get("local_x", item.get("x")))
+        ly = float(item.get("local_y", item.get("y")))
+    except (KeyError, TypeError, ValueError):
         return None
-    if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+    if not (math.isfinite(lx) and math.isfinite(ly)) or abs(lx) > 1e6 or abs(ly) > 1e6:
         return None
-    if not (math.isfinite(lat) and math.isfinite(lng)):
+    lat_g, lng_g = local_to_gps(lx, ly)
+    if not (math.isfinite(lat_g) and math.isfinite(lng_g)):
         return None
-    return {"id": lid, "name": name, "lat": lat, "lng": lng}
+    return {"id": lid, "name": name, "lat": lat_g, "lng": lng_g}
 
 
 def set_pickup_catalog(locations: List[Dict[str, Any]]) -> bool:

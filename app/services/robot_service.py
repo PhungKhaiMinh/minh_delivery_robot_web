@@ -78,8 +78,8 @@ def _pose_fields() -> dict:
 
 async def get_robot_position(robot_id: str) -> Optional[dict]:
     """
-    Ưu tiên tọa độ từ MQTT UGV/localization/pose (x, y, yaw) và lat/lng suy từ gốc
-    (local_to_gps) cho bản đồ. Bổ sung pin/tốc độ từ server hoặc DB khi có.
+    Ưu tiên tọa độ từ MQTT UGV/localization/pose (x, y, yaw).
+    Bổ sung pin/tốc độ từ server hoặc DB khi có.
     """
     pose = _pose_fields()
     if pose.get("x") is not None and pose.get("y") is not None:

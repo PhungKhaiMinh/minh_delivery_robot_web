@@ -7,8 +7,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from datetime import datetime
+from typing import Optional
 
-from app.services.pickup_locations_store import get_catalog_locations
+from app.services.pickup_locations_store import get_catalog_locations, list_pickup_locations_admin
 from app.services.auth_service import get_current_user
 from app.services.booking_service import get_user_bookings, get_active_bookings, get_booking_by_id
 from app.services.db_service import db
@@ -148,6 +149,19 @@ async def page_order_detail(booking_id: str, request: Request):
     is_active = booking.get("status") in active_statuses
     robot = _get_robot_info()
 
+    pickup_map_x: Optional[float] = None
+    pickup_map_y: Optional[float] = None
+    pid = booking.get("pickup_location_id")
+    if pid:
+        for loc in list_pickup_locations_admin():
+            if str(loc.get("id")) == str(pid):
+                try:
+                    pickup_map_x = float(loc["x"])
+                    pickup_map_y = float(loc["y"])
+                except (KeyError, TypeError, ValueError):
+                    pickup_map_x = pickup_map_y = None
+                break
+
     return templates.TemplateResponse(
         request,
         "order_detail.html",
@@ -160,6 +174,8 @@ async def page_order_detail(booking_id: str, request: Request):
             "robot_battery": robot["battery"],
             "locations": get_catalog_locations(),
             "current_date": datetime.now().strftime("%A, %d/%m/%Y"),
+            "pickup_map_x": pickup_map_x,
+            "pickup_map_y": pickup_map_y,
         },
     )
 
