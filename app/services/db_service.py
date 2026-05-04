@@ -42,6 +42,7 @@ class Document:
         self.id = doc_id
         self.file_path = collection_path / f"{doc_id}.json"
         self._lock = threading.Lock()
+        self.last_set_error: str = ""
 
     def get(self) -> Optional[dict]:
         """Đọc dữ liệu document. Trả về None nếu không tồn tại."""
@@ -62,6 +63,7 @@ class Document:
         Nếu merge=True, chỉ cập nhật các trường được cung cấp (giữ nguyên trường cũ).
         Nếu merge=False, ghi đè toàn bộ document.
         """
+        self.last_set_error = ""
         try:
             with self._lock:
                 write_data = {}
@@ -83,6 +85,7 @@ class Document:
                     json.dump(write_data, f, ensure_ascii=False, indent=2, default=str)
                 return True
         except (IOError, TypeError) as e:
+            self.last_set_error = str(e)
             print(f"[DB ERROR] Không thể ghi document {self.id}: {e}")
             return False
 

@@ -35,6 +35,7 @@ class FirestoreDocument:
     def __init__(self, doc_ref: firestore.DocumentReference):
         self._ref = doc_ref
         self.id = doc_ref.id
+        self.last_set_error: str = ""
 
     def get(self) -> Optional[dict]:
         try:
@@ -49,6 +50,7 @@ class FirestoreDocument:
             return None
 
     def set(self, data: dict, merge: bool = False) -> bool:
+        self.last_set_error = ""
         try:
             clean = _strip_id(data)
             now = datetime.now(timezone.utc).isoformat()
@@ -67,6 +69,7 @@ class FirestoreDocument:
                 self._ref.set(clean)
             return True
         except Exception as e:
+            self.last_set_error = str(e)
             print(f"[FIRESTORE ERROR] set {self._ref.path}: {e}")
             return False
 

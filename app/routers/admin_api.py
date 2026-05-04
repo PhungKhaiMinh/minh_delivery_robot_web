@@ -495,10 +495,15 @@ async def admin_put_waypoints_dataset(request: Request):
             if "pickup_portal_edges" in body
             else get_waypoints_bundle()["pickup_portal_edges"]
         )
-        if not set_waypoint_traversal_graph(edges, portals):
+        ok_g, err_g = set_waypoint_traversal_graph(edges, portals)
+        if not ok_g:
             return JSONResponse(
                 status_code=500,
-                content={"success": False, "message": "Lưu đồ thị waypoint thất bại."},
+                content={
+                    "success": False,
+                    "message": "Lưu đồ thị waypoint thất bại.",
+                    "detail": err_g,
+                },
             )
 
     if not isinstance(raw, list) and "edges" not in body and "pickup_portal_edges" not in body:

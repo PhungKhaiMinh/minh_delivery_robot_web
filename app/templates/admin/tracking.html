@@ -549,7 +549,8 @@
                     });
                     var j = await res.json().catch(function () { return null; });
                     if (!res.ok || !j || !j.success) {
-                        throw new Error((j && j.message) || res.statusText || 'Lỗi HTTP');
+                        var det = (j && j.detail) ? String(j.detail) : '';
+                        throw new Error(det || (j && j.message) || res.statusText || 'Lỗi HTTP');
                     }
                     this.waypointsRaw = j.waypoints || [];
                     this.edges = (j.edges || []).map(function (x) { return [String(x[0]), String(x[1])]; });

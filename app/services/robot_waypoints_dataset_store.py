@@ -144,9 +144,10 @@ def get_waypoints_bundle() -> Dict[str, Any]:
     return {"waypoints": waypoints, "edges": edges, "pickup_portal_edges": portals}
 
 
-def set_waypoint_traversal_graph(edges_raw: Any, portals_raw: Any) -> bool:
+def set_waypoint_traversal_graph(edges_raw: Any, portals_raw: Any) -> tuple[bool, str]:
     """
     Ghi edges + pickup_portal_edges (merge). Chỉ giữ cạnh hợp lệ theo waypoint hiện tại và catalog pickup.
+    Trả về (True, "") hoặc (False, thông báo lỗi ghi / chuẩn hóa).
     """
     waypoints = get_waypoints_dataset()
     wp_ids = {str(w["id"]) for w in waypoints}
@@ -172,11 +173,26 @@ def set_waypoint_traversal_graph(edges_raw: Any, portals_raw: Any) -> bool:
                 seen_p.add(pr)
                 portals_out.append({"pickup_id": pr[0], "waypoint_id": pr[1]})
 
+    if isinstance(edges_raw, list) and len(edges_raw) > 0 and len(edges_out) == 0:
+        return (
+            False,
+            (
+                "Không có cạnh nào hợp lệ: id waypoint trên cạnh không khớp dataset trên server. "
+                "Lưu dataset waypoint ở trang Orders trước, hoặc bấm Lưu đồ thị khi trang đã tải được waypoint từ server."
+            ),
+        )
+
     ref = db.collection(ADMIN_CONFIG_COLLECTION).document(WAYPOINT_DATASET_DOC_ID)
-    return ref.set(
+    ok = ref.set(
         {"edges": edges_out, "pickup_portal_edges": portals_out},
         merge=True,
     )
+    if ok:
+        return True, ""
+    err = (getattr(ref, "last_set_error", None) or "").strip()
+    if err:
+        print(f"[WAYPOINT GRAPH] set failed: {err}")
+    return False, err or "Không ghi được document (Firestore hoặc file JSON)."
 
 
 def set_waypoints_dataset(raw_list: Any) -> bool:
