@@ -81,6 +81,7 @@
         </p>
         <p class="text-xs text-violet-700/90 font-medium">
             Nút <strong>Lưu</strong> luôn bấm được (chỉ khóa khi đang gửi). Có thể lưu chỉ danh sách cạnh; không cần tải pickup.
+            Điểm tím (waypoint) và cam (pickup) dùng <strong>cùng phép chiếu</strong> với graph RTAB trên map để trùng tọa độ m với PNG/opt_map.
         </p>
         <p class="text-xs font-medium" :class="graphEditMode ? 'text-amber-800' : 'text-slate-500'" x-text="graphHint"></p>
         <div class="flex flex-wrap gap-2">
@@ -176,6 +177,14 @@
         return [ll.lng + bb.xmin, bb.ymax - ll.lat];
     }
 
+    /**
+     * Đưa (world x, world y) mét → LatLng Leaflet **cùng quy ước** với node/link graph RTAB (graphDisplayWorldY).
+     * Waypoint & pickup (Orders) dùng cùng hệ m với pose — phải vẽ giống node xanh để khớp PNG / graph.
+     */
+    function rtabGraphAlignWorldToMapLL(wx, wy, bb) {
+        return worldToMapLatLng(wx, graphDisplayWorldY(wy, bb), bb);
+    }
+
     function adminTracking(cfg) {
         cfg = cfg || {};
         var topicPose = cfg.topicPose || 'UGV/localization/pose';
@@ -227,6 +236,7 @@
             graphLoadErr: '',
             graphSaveOk: '',
             waypointsRaw: [],
+            pickupsRaw: [],
             edges: [],
             pendingFrom: null,
 
@@ -572,10 +582,18 @@
                 this.graphLoadErr = '';
                 try {
                     var dr = await fetch('/api/admin/waypoints-dataset', { credentials: 'same-origin' });
+                    var pr = await fetch('/api/admin/pickup-locations', { credentials: 'same-origin' });
                     var dj = await dr.json();
+                    var pj = null;
+                    try {
+                        pj = pr.ok ? await pr.json() : null;
+                    } catch (_) {
+                        pj = null;
+                    }
                     if (!dj.success) throw new Error(dj.message || 'waypoints-dataset');
                     self.waypointsRaw = dj.waypoints || [];
                     self.edges = (dj.edges || []).map(function (x) { return [String(x[0]), String(x[1])]; });
+                    self.pickupsRaw = (pj && pj.success && Array.isArray(pj.locations)) ? pj.locations : [];
                     self._renderUserGraphLayers();
                 } catch (e) {
                     self.graphLoadErr = (e && e.message) ? e.message : 'Không tải waypoint-dataset';
@@ -596,7 +614,7 @@
                     wpById[wid] = w;
                     var c = w.center;
                     if (!c || c.x == null || c.y == null) return;
-                    var ll = worldToMapLatLng(Number(c.x), Number(c.y), b);
+                    var ll = rtabGraphAlignWorldToMapLL(Number(c.x), Number(c.y), b);
                     var m = L.circleMarker(ll, {
                         radius: self.graphEditMode ? 8 : 5,
                         fillColor: '#7c3aed',
@@ -616,7 +634,10 @@
                             self.onWpMarkerClick(wid);
                         });
                     } else {
-                        m.bindPopup('<div class="text-xs"><b>' + String(w.name || '') + '</b><br><span class="font-mono">' + wid + '</span></div>');
+                        m.bindPopup(
+                            '<div class="text-xs"><b>' + String(w.name || '') + '</b><br><span class="font-mono">' + wid +
+                            '</span><br><span class="text-slate-600">x=' + Number(c.x).toFixed(4) + ' y=' + Number(c.y).toFixed(4) + ' m</span></div>'
+                        );
                     }
                 });
                 (this.edges || []).forEach(function (e) {
@@ -624,11 +645,26 @@
                     if (!wa || !wb || !wa.center || !wb.center) return;
                     L.polyline(
                         [
-                            worldToMapLatLng(Number(wa.center.x), Number(wa.center.y), b),
-                            worldToMapLatLng(Number(wb.center.x), Number(wb.center.y), b),
+                            rtabGraphAlignWorldToMapLL(Number(wa.center.x), Number(wa.center.y), b),
+                            rtabGraphAlignWorldToMapLL(Number(wb.center.x), Number(wb.center.y), b),
                         ],
                         { color: '#7c3aed', weight: 3, opacity: 0.78, lineCap: 'round' }
                     ).addTo(wpEdgeLayer);
+                });
+                (this.pickupsRaw || []).forEach(function (p) {
+                    if (p.x == null || p.y == null) return;
+                    var pid = String(p.id);
+                    var ll = rtabGraphAlignWorldToMapLL(Number(p.x), Number(p.y), b);
+                    L.circleMarker(ll, {
+                        radius: self.graphEditMode ? 7 : 4,
+                        fillColor: '#fdba74',
+                        color: '#c2410c',
+                        weight: 2,
+                        fillOpacity: 0.88,
+                    }).addTo(wpUserLayer).bindPopup(
+                        '<div class="text-xs"><b>' + String(p.name || pid) + '</b><br><span class="font-mono">' + pid +
+                        '</span><br><span class="text-slate-600">x=' + Number(p.x).toFixed(4) + ' y=' + Number(p.y).toFixed(4) + ' m</span></div>'
+                    );
                 });
             },
         };
