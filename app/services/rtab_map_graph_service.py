@@ -734,7 +734,9 @@ async def save_rtab_map_from_upload(upload: Any, max_bytes: Optional[int] = None
     """
     Ghi upload vào ``RTAB_MAP_DB_PATH`` (thay thế nguyên file). Trả (ok, message).
     ``upload`` là FastAPI ``UploadFile`` (có ``read`` async).
+    ``max_bytes``: nếu > 0 thì giới hạn kích thước; None dùng ``RTAB_MAP_DB_MAX_BYTES`` (0 = không giới hạn).
     """
+    # 0 = không giới hạn (chỉ giới hạn đĩa / proxy nếu có).
     limit = max_bytes if max_bytes is not None else RTAB_MAP_DB_MAX_BYTES
     dest = Path(RTAB_MAP_DB_PATH).resolve()
     try:
@@ -755,8 +757,8 @@ async def save_rtab_map_from_upload(upload: Any, max_bytes: Optional[int] = None
                 if not block:
                     break
                 total += len(block)
-                if total > limit:
-                    return False, f"File vượt quá {limit // (1024 * 1024)} MB."
+                if limit > 0 and total > limit:
+                    return False, f"File vượt quá {limit // (1024 * 1024)} MB (cấu hình RTAB_MAP_DB_MAX_BYTES)."
                 out.write(block)
 
         ok, err = validate_rtab_sqlite_file(tmp_path)

@@ -48,7 +48,9 @@
             Mọi máy / mọi trình duyệt đăng nhập admin vào <strong>cùng một website</strong> đều thấy cùng một map (file nằm trên server, không lưu trong máy từng PC).
             Trên Railway: thêm <strong>Volume</strong> (vd. mount <code class="bg-slate-100 px-1 rounded">/data</code>) và biến môi trường
             <code class="bg-slate-100 px-1 rounded">RTAB_MAP_DB_PATH=/data/A5_night.db</code>, rồi tải file <code class="bg-slate-100 px-1 rounded">.db</code> một lần tại đây.
-            Không commit file &gt;100MB lên GitHub.
+            Ứng dụng không giới hạn dung lượng file .db khi tải lên (trừ khi bạn đặt biến môi trường <code class="bg-slate-100 px-1 rounded">RTAB_MAP_DB_MAX_BYTES</code>).
+            Reverse proxy (nginx, …) có thể vẫn giới hạn body — cần tăng <code class="bg-slate-100 px-1 rounded">client_max_body_size</code> nếu upload lớn.
+            Không commit file map lớn lên GitHub.
         </p>
         <dl class="text-xs space-y-1 font-mono text-slate-700 bg-slate-50 rounded-xl p-3 border border-slate-100">
             <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Đường dẫn server</dt><dd class="break-all" x-text="rtabPath || rtabMapDbPath"></dd></div>

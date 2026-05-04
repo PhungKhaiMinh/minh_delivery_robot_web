@@ -187,7 +187,12 @@ CAMPUS_ORIGIN_ALT = float(os.getenv("CAMPUS_ORIGIN_ALT", "0.0"))
 # === RTAB-Map database (graph pose) — Admin Tracking ===
 # Railway: gắn Volume (vd. mount /data) và đặt RTAB_MAP_DB_PATH=/data/A5_night.db — file không nằm trong Git.
 RTAB_MAP_DB_PATH = os.getenv("RTAB_MAP_DB_PATH", str(BASE_DIR / "A5_night.db"))
-RTAB_MAP_DB_MAX_BYTES = int(os.getenv("RTAB_MAP_DB_MAX_BYTES", str(260 * 1024 * 1024)))
+# 0 / rỗng / unlimited = không giới hạn kích thước upload ở tầng ứng dụng (vẫn chịu giới hạn reverse proxy / đĩa).
+_rtab_max_raw = os.getenv("RTAB_MAP_DB_MAX_BYTES", "").strip()
+if not _rtab_max_raw or _rtab_max_raw.lower() in ("0", "none", "unlimited", "-1"):
+    RTAB_MAP_DB_MAX_BYTES = 0
+else:
+    RTAB_MAP_DB_MAX_BYTES = int(_rtab_max_raw)
 # Điểm môi trường (laser / obstacle) dùng khi build raster / hoặc gửi raw khi raster=0
 RTAB_MAP_ENV_MAX_POINTS = int(os.getenv("RTAB_MAP_ENV_MAX_POINTS", "180000"))
 # Cạnh dài nhất (px) của PNG môi trường — tăng để gần độ mịn Graph View của RTAB-Map
