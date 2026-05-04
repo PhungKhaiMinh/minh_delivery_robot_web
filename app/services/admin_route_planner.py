@@ -1,11 +1,12 @@
 """
 Hoạch định lộ trình test: điểm đầu / cuối = địa điểm nhận sách (tọa center x,y),
-các đỉnh trung gian = waypoint robot (center). Đồ thị do admin định nghĩa:
+các đỉnh trung gian = waypoint robot (center).
 
-- Cạnh waypoint–waypoint (đi được giữa hai waypoint).
-- Cạnh cổng pickup↔waypoint: robot chỉ vào/ra pickup tại các waypoint được nối thủ công.
+- Cạnh waypoint–waypoint: do admin nối trên Tracking (đường robot được phép đi).
+- Nối pickup đầu/cuối vào đồ thị: **tự động** tới mọi waypoint là **đầu mút** của ít nhất một cạnh,
+  trọng số = khoảng cách Euclid (m) từ center pickup tới center waypoint (và ngược lại tới đích).
+  Dijkstra chọn cặp vào/ra tối ưu theo **tổng** đường đi ngắn nhất.
 
-Dijkstra trên đồ thị thưa (trọng số = khoảng cách Euclid mét trên từng cạnh).
 Không có cạnh trực tiếp điểm đầu → điểm cuối.
 
 Kết quả: stage_x/y = center, stage_x_margin/y_margin = right_side (waypoint) hoặc margin (pickup).
@@ -81,7 +82,6 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
     bundle = get_waypoints_bundle()
     wps = bundle.get("waypoints") or []
     edges = bundle.get("edges") or []
-    portals = bundle.get("pickup_portal_edges") or []
 
     if not wps:
         return None
@@ -116,7 +116,8 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
         adj[u].append((v, d))
         adj[v].append((u, d))
 
-    # Cạnh waypoint–waypoint
+    # Cạnh waypoint–waypoint + thu thập đỉnh thuộc đồ thị (đầu mút cạnh user)
+    wp_on_graph: set[str] = set()
     for pair in edges:
         if not isinstance(pair, (list, tuple)) or len(pair) != 2:
             continue
@@ -127,31 +128,29 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
         pb = center_xy(id_to_wp[b])
         if pa is None or pb is None:
             continue
+        wp_on_graph.add(a)
+        wp_on_graph.add(b)
         ia, ib = wp_index(a), wp_index(b)
         add_edge(ia, ib, _euclid(pa, pb))
+
+    if not wp_on_graph:
+        return None
 
     sp = by_pid[sid]
     ep = by_pid[eid]
     start_pt = (float(sp["x"]), float(sp["y"]))
     end_pt = (float(ep["x"]), float(ep["y"]))
 
-    # Cổng pickup ↔ waypoint
-    for po in portals:
-        if not isinstance(po, dict):
+    for wid in wp_on_graph:
+        wpt = id_to_wp.get(wid)
+        if wpt is None:
             continue
-        pid = str(po.get("pickup_id", "")).strip()
-        wid = str(po.get("waypoint_id", "")).strip()
-        if wid not in id_to_wp:
-            continue
-        wpt = id_to_wp[wid]
         wc = center_xy(wpt)
         if wc is None:
             continue
         wi = wp_index(wid)
-        if pid == sid:
-            add_edge(SRC, wi, _euclid(start_pt, wc))
-        if pid == eid:
-            add_edge(wi, DST, _euclid(wc, end_pt))
+        add_edge(SRC, wi, _euclid(start_pt, wc))
+        add_edge(wi, DST, _euclid(wc, end_pt))
 
     path_idx = _dijkstra_sparse(adj, SRC, DST)
     if path_idx is None:

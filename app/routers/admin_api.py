@@ -304,9 +304,8 @@ async def admin_test_route_plan(request: Request):
                 "success": False,
                 "message": (
                     "Không hoạch định được: kiểm tra id đầu/cuối khác nhau, catalog pickup, "
-                    "dataset waypoint (center + right_side), và đồ thị đi đường trên trang Tracking: "
-                    "cần cạnh waypoint–waypoint + cổng pickup↔waypoint nối điểm đầu/cuối tới đồ thị "
-                    "(Dijkstra chỉ đi theo cạnh đã định nghĩa)."
+                    "dataset waypoint, và trên Tracking đã có **ít nhất một cạnh** waypoint–waypoint "
+                    "(đồ thị nối được từ điểm đầu tới điểm cuối; Dijkstra tự chọn waypoint vào/ra pickup)."
                 ),
             },
         )

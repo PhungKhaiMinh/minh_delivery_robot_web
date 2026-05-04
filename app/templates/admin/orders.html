@@ -365,8 +365,9 @@
         <p class="text-sm text-slate-500 mt-1">
             Chọn điểm đầu và điểm cuối từ <strong>Địa điểm nhận sách</strong> (tọa center). Nút <strong>Hoạch định đường đi</strong> chạy Dijkstra trên <strong>đồ thị do bạn định nghĩa</strong> trên trang
             <a href="/admin/tracking" class="text-sky-700 font-medium hover:underline">Tracking</a>:
-            cạnh waypoint–waypoint và cổng pickup ↔ waypoint (trọng số = khoảng cách Euclid mét trên từng cạnh). Không còn nối đầy đủ mọi cặp đỉnh.
-            Cần dataset waypoint hợp lệ và lộ trình nối được từ điểm đầu tới điểm cuối qua các cạnh đó. Sau khi xem lại thứ tự, nhấn <strong>Bắt đầu</strong> để gửi lên MQTT topic path với bốn mảng song song:
+            chỉ các <strong>cạnh waypoint–waypoint</strong> do bạn nối (trọng số Euclid mét). Hệ thống tự nối pickup đầu/cuối tới các waypoint trên đồ thị để Dijkstra chọn đường ngắn nhất tổng thể.
+            Cần ít nhất một cạnh WP–WP và lộ trình liên thông giữa hai pickup.
+            Sau khi xem lại thứ tự, nhấn <strong>Bắt đầu</strong> để gửi lên MQTT topic path với bốn mảng song song:
             <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x</code>/<code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y</code> = center;
             <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x_margin</code>/<code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y_margin</code> = margin pickup hoặc <code class="text-slate-700 bg-slate-100 px-1 rounded">right_side</code> của waypoint.
         </p>
