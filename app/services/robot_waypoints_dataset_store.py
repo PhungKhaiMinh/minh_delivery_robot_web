@@ -1,6 +1,6 @@
 """
 Dataset waypoint robot: mỗi điểm có tên + tọa độ center (x,y) và right_side (x,y) riêng.
-Đồ thị điều hướng (Dijkstra trên admin route test): cạnh waypoint–waypoint + cổng pickup↔waypoint.
+Đồ thị điều hướng: cạnh waypoint–waypoint (lưu Firestore dạng [{u,v}] — không dùng mảng lồng mảng).
 Lưu admin_config / robot_waypoints_dataset — Firestore hoặc DB JSON local.
 """
 
@@ -92,14 +92,31 @@ def get_waypoints_dataset() -> List[Dict[str, Any]]:
 
 
 def _normalize_waypoint_edge(item: Any, valid_ids: Set[str]) -> Optional[Tuple[str, str]]:
-    if not isinstance(item, (list, tuple)) or len(item) != 2:
+    """
+    Chuẩn hóa một cạnh từ client hoặc DB.
+    Chấp nhận: [id1, id2], {"u","v"} (Firestore), {"from","to"} (tùy chọn).
+    """
+    a: Optional[str] = None
+    b: Optional[str] = None
+    if isinstance(item, (list, tuple)) and len(item) == 2:
+        a, b = str(item[0]).strip(), str(item[1]).strip()
+    elif isinstance(item, dict):
+        if "u" in item and "v" in item:
+            a, b = str(item["u"]).strip(), str(item["v"]).strip()
+        elif "from" in item and "to" in item:
+            a, b = str(item["from"]).strip(), str(item["to"]).strip()
+    if a is None or b is None:
         return None
-    a, b = str(item[0]).strip(), str(item[1]).strip()
     if not _ID_RE.match(a) or not _ID_RE.match(b) or a == b:
         return None
     if a not in valid_ids or b not in valid_ids:
         return None
     return (a, b) if a < b else (b, a)
+
+
+def _edges_for_storage(edges_pairs: List[Tuple[str, str]]) -> List[Dict[str, str]]:
+    """Firestore: không cho [[a,b],...]; chỉ cho [{u,v},...]."""
+    return [{"u": p[0], "v": p[1]} for p in edges_pairs]
 
 
 def _normalize_portal(item: Any, wp_ids: Set[str], pickup_ids: Set[str]) -> Optional[Tuple[str, str]]:
@@ -155,14 +172,14 @@ def set_waypoint_traversal_graph(edges_raw: Any, portals_raw: Any) -> tuple[bool
 
     pickup_ids = {str(p["id"]) for p in list_pickup_locations_admin()}
 
-    edges_out: List[List[str]] = []
+    edges_out_pairs: List[Tuple[str, str]] = []
     seen_e: set[Tuple[str, str]] = set()
     if isinstance(edges_raw, list):
         for it in edges_raw:
             p = _normalize_waypoint_edge(it, wp_ids)
             if p and p not in seen_e and len(seen_e) < _MAX_WAYPOINT_EDGES:
                 seen_e.add(p)
-                edges_out.append([p[0], p[1]])
+                edges_out_pairs.append(p)
 
     portals_out: List[Dict[str, str]] = []
     seen_p: set[Tuple[str, str]] = set()
@@ -173,7 +190,7 @@ def set_waypoint_traversal_graph(edges_raw: Any, portals_raw: Any) -> tuple[bool
                 seen_p.add(pr)
                 portals_out.append({"pickup_id": pr[0], "waypoint_id": pr[1]})
 
-    if isinstance(edges_raw, list) and len(edges_raw) > 0 and len(edges_out) == 0:
+    if isinstance(edges_raw, list) and len(edges_raw) > 0 and len(edges_out_pairs) == 0:
         return (
             False,
             (
@@ -184,7 +201,7 @@ def set_waypoint_traversal_graph(edges_raw: Any, portals_raw: Any) -> tuple[bool
 
     ref = db.collection(ADMIN_CONFIG_COLLECTION).document(WAYPOINT_DATASET_DOC_ID)
     ok = ref.set(
-        {"edges": edges_out, "pickup_portal_edges": portals_out},
+        {"edges": _edges_for_storage(edges_out_pairs), "pickup_portal_edges": portals_out},
         merge=True,
     )
     if ok:
