@@ -66,7 +66,7 @@
     <p class="text-sm text-red-600 font-medium" x-show="graphErr" x-text="graphErr"></p>
     <p class="text-xs text-slate-500" x-show="graphMeta && !graphErr" x-text="graphMeta"></p>
 
-    <div class="rounded-2xl border border-violet-200 bg-violet-50/80 p-4 space-y-3" x-show="mapReady && !graphErr">
+    <div class="rounded-2xl border border-violet-200 bg-violet-50/80 p-4 space-y-3" x-show="mapReady">
         <div class="flex flex-wrap items-center justify-between gap-2">
             <h2 class="text-sm font-bold text-violet-900">Đồ thị đường đi robot (waypoint)</h2>
             <label class="inline-flex items-center gap-2 text-xs font-medium text-violet-900 cursor-pointer select-none">
@@ -78,6 +78,9 @@
             <strong>Cạnh waypoint–waypoint:</strong> bật chế độ nối → chọn waypoint A → chọn waypoint B (đường tím).
             <strong>Cổng pickup:</strong> chọn điểm nhận sách (viền cam) rồi chọn waypoint — robot chỉ được vào/ra pickup qua các cổng đã nối.
             Nhấn lại đúng điểm đang chọn để hủy. <kbd class="px-1 bg-white rounded border text-[10px]">Esc</kbd> xóa lựa chọn.
+        </p>
+        <p class="text-xs text-violet-700/90 font-medium">
+            Vị trí: ngay <strong>phía trên</strong> ô bản đồ (khối tím). Nếu không thấy: tải lại trang sau khi deploy code mới; lỗi Leaflet «Map container is already initialized» đã được xử lý để panel không bị ẩn.
         </p>
         <p class="text-xs font-medium" :class="graphEditMode ? 'text-amber-800' : 'text-slate-500'" x-text="graphHint"></p>
         <div class="flex flex-wrap gap-2">
@@ -242,6 +245,10 @@
 
             init: function () {
                 var self = this;
+                if (self._trackingInitOnce) {
+                    return;
+                }
+                self._trackingInitOnce = true;
                 this._onKey = function (ev) {
                     if (ev.key === 'Escape' && self.graphEditMode) {
                         self.pendingFrom = null;
@@ -256,6 +263,17 @@
 
             _boot: async function () {
                 var self = this;
+                if (self._bootLock) {
+                    return;
+                }
+                self._bootLock = true;
+                try {
+                /* Leaflet: không gọi L.map() hai lần trên cùng #admin-map (race khi init/async). */
+                if (map !== null && graphBounds) {
+                    self.graphErr = '';
+                    await self._loadWaypointGraphOverlay();
+                    return;
+                }
                 var res = await fetch(graphUrl, { credentials: 'same-origin' });
                 var graph = await res.json().catch(function () { return null; });
                 if (!graph || !graph.success) {
@@ -263,6 +281,7 @@
                     return;
                 }
                 graphBounds = graph.bounds;
+                self.graphErr = '';
                 var b = graphBounds;
                 var h = b.ymax - b.ymin;
                 var w = b.xmax - b.xmin;
@@ -459,6 +478,9 @@
                             self.trailCount = trailCoords.length;
                         }
                     });
+                }
+                } finally {
+                    self._bootLock = false;
                 }
             },
 
