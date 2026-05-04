@@ -1,5 +1,6 @@
 """
 Dataset waypoint robot: mỗi điểm có tên + tọa độ center (x,y) và right_side (x,y) riêng.
+Đồ thị điều hướng (Dijkstra trên admin route test): cạnh waypoint–waypoint + cổng pickup↔waypoint.
 Lưu admin_config / robot_waypoints_dataset — Firestore hoặc DB JSON local.
 """
 
@@ -7,7 +8,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.services.db_service import db
 
@@ -16,6 +17,8 @@ WAYPOINT_DATASET_DOC_ID = "robot_waypoints_dataset"
 
 _ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _MAX_WAYPOINTS = 500
+_MAX_WAYPOINT_EDGES = 4000
+_MAX_PICKUP_PORTALS = 800
 
 
 def _finite_xy(x: float, y: float) -> bool:
@@ -86,6 +89,94 @@ def get_waypoints_dataset() -> List[Dict[str, Any]]:
         if n:
             out.append(n)
     return out
+
+
+def _normalize_waypoint_edge(item: Any, valid_ids: Set[str]) -> Optional[Tuple[str, str]]:
+    if not isinstance(item, (list, tuple)) or len(item) != 2:
+        return None
+    a, b = str(item[0]).strip(), str(item[1]).strip()
+    if not _ID_RE.match(a) or not _ID_RE.match(b) or a == b:
+        return None
+    if a not in valid_ids or b not in valid_ids:
+        return None
+    return (a, b) if a < b else (b, a)
+
+
+def _normalize_portal(item: Any, wp_ids: Set[str], pickup_ids: Set[str]) -> Optional[Tuple[str, str]]:
+    if not isinstance(item, dict):
+        return None
+    pid = str(item.get("pickup_id", "")).strip()
+    wid = str(item.get("waypoint_id", "")).strip()
+    if not _ID_RE.match(pid) or not _ID_RE.match(wid):
+        return None
+    if pid not in pickup_ids or wid not in wp_ids:
+        return None
+    return (pid, wid)
+
+
+def get_waypoints_bundle() -> Dict[str, Any]:
+    """waypoints + edges (waypoint–waypoint) + pickup_portal_edges (pickup↔waypoint)."""
+    doc = db.collection(ADMIN_CONFIG_COLLECTION).document(WAYPOINT_DATASET_DOC_ID).get()
+    waypoints = get_waypoints_dataset()
+    wp_ids = {str(w["id"]) for w in waypoints}
+    edges: List[List[str]] = []
+    portals: List[Dict[str, str]] = []
+    if doc:
+        raw_e = doc.get("edges")
+        if isinstance(raw_e, list):
+            seen: set[Tuple[str, str]] = set()
+            for it in raw_e:
+                p = _normalize_waypoint_edge(it, wp_ids)
+                if p and p not in seen and len(seen) < _MAX_WAYPOINT_EDGES:
+                    seen.add(p)
+                    edges.append([p[0], p[1]])
+        raw_p = doc.get("pickup_portal_edges")
+        if isinstance(raw_p, list):
+            from app.services.pickup_locations_store import list_pickup_locations_admin
+
+            pids = {str(p["id"]) for p in list_pickup_locations_admin()}
+            seen_p: set[Tuple[str, str]] = set()
+            for it in raw_p:
+                pr = _normalize_portal(it, wp_ids, pids)
+                if pr and pr not in seen_p and len(seen_p) < _MAX_PICKUP_PORTALS:
+                    seen_p.add(pr)
+                    portals.append({"pickup_id": pr[0], "waypoint_id": pr[1]})
+    return {"waypoints": waypoints, "edges": edges, "pickup_portal_edges": portals}
+
+
+def set_waypoint_traversal_graph(edges_raw: Any, portals_raw: Any) -> bool:
+    """
+    Ghi edges + pickup_portal_edges (merge). Chỉ giữ cạnh hợp lệ theo waypoint hiện tại và catalog pickup.
+    """
+    waypoints = get_waypoints_dataset()
+    wp_ids = {str(w["id"]) for w in waypoints}
+    from app.services.pickup_locations_store import list_pickup_locations_admin
+
+    pickup_ids = {str(p["id"]) for p in list_pickup_locations_admin()}
+
+    edges_out: List[List[str]] = []
+    seen_e: set[Tuple[str, str]] = set()
+    if isinstance(edges_raw, list):
+        for it in edges_raw:
+            p = _normalize_waypoint_edge(it, wp_ids)
+            if p and p not in seen_e and len(seen_e) < _MAX_WAYPOINT_EDGES:
+                seen_e.add(p)
+                edges_out.append([p[0], p[1]])
+
+    portals_out: List[Dict[str, str]] = []
+    seen_p: set[Tuple[str, str]] = set()
+    if isinstance(portals_raw, list):
+        for it in portals_raw:
+            pr = _normalize_portal(it, wp_ids, pickup_ids)
+            if pr and pr not in seen_p and len(seen_p) < _MAX_PICKUP_PORTALS:
+                seen_p.add(pr)
+                portals_out.append({"pickup_id": pr[0], "waypoint_id": pr[1]})
+
+    ref = db.collection(ADMIN_CONFIG_COLLECTION).document(WAYPOINT_DATASET_DOC_ID)
+    return ref.set(
+        {"edges": edges_out, "pickup_portal_edges": portals_out},
+        merge=True,
+    )
 
 
 def set_waypoints_dataset(raw_list: Any) -> bool:

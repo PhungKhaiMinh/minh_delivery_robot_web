@@ -363,10 +363,10 @@
     <div>
         <h2 class="text-xl font-bold text-slate-900">Kịch bản test thực địa</h2>
         <p class="text-sm text-slate-500 mt-1">
-            Chọn điểm đầu và điểm cuối từ <strong>Địa điểm nhận sách</strong> (tọa center dùng cho đồ thị). Nút <strong>Hoạch định đường đi</strong> chạy Dijkstra trên đồ thị:
-            điểm đầu, <strong>tất cả waypoint</strong> trong dataset (theo <code class="text-slate-700 bg-slate-100 px-1 rounded">center</code>), điểm cuối — mỗi cặp đỉnh có cạnh với trọng số bằng khoảng cách Euclid (m),
-            <strong>trừ</strong> cạnh trực tiếp điểm đầu → điểm cuối (robot luôn phải đi qua <strong>ít nhất một</strong> waypoint vì dataset mô tả đường robot đi được giữa các địa điểm).
-            Cần <strong>ít nhất một waypoint</strong> hợp lệ trong Dataset waypoint robot. Sau khi xem lại thứ tự, nhấn <strong>Bắt đầu</strong> để gửi lên MQTT topic path với bốn mảng song song:
+            Chọn điểm đầu và điểm cuối từ <strong>Địa điểm nhận sách</strong> (tọa center). Nút <strong>Hoạch định đường đi</strong> chạy Dijkstra trên <strong>đồ thị do bạn định nghĩa</strong> trên trang
+            <a href="/admin/tracking" class="text-sky-700 font-medium hover:underline">Tracking</a>:
+            cạnh waypoint–waypoint và cổng pickup ↔ waypoint (trọng số = khoảng cách Euclid mét trên từng cạnh). Không còn nối đầy đủ mọi cặp đỉnh.
+            Cần dataset waypoint hợp lệ và lộ trình nối được từ điểm đầu tới điểm cuối qua các cạnh đó. Sau khi xem lại thứ tự, nhấn <strong>Bắt đầu</strong> để gửi lên MQTT topic path với bốn mảng song song:
             <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x</code>/<code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y</code> = center;
             <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x_margin</code>/<code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y_margin</code> = margin pickup hoặc <code class="text-slate-700 bg-slate-100 px-1 rounded">right_side</code> của waypoint.
         </p>

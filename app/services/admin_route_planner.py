@@ -1,10 +1,13 @@
 """
 Hoạch định lộ trình test: điểm đầu / cuối = địa điểm nhận sách (tọa center x,y),
-các đỉnh trung gian = waypoint robot (center). Robot chỉ đi theo các đoạn có thể
-mô hình hóa qua waypoint dataset — **không** có cạnh trực tiếp điểm đầu → điểm cuối;
-Dijkstra trên đồ thị đầy đủ còn lại (khoảng cách Euclid, mét).
+các đỉnh trung gian = waypoint robot (center). Đồ thị do admin định nghĩa:
 
-Ràng buộc: lộ trình luôn đi qua **ít nhất một** waypoint (cần dataset không rỗng).
+- Cạnh waypoint–waypoint (đi được giữa hai waypoint).
+- Cạnh cổng pickup↔waypoint: robot chỉ vào/ra pickup tại các waypoint được nối thủ công.
+
+Dijkstra trên đồ thị thưa (trọng số = khoảng cách Euclid mét trên từng cạnh).
+Không có cạnh trực tiếp điểm đầu → điểm cuối.
+
 Kết quả: stage_x/y = center, stage_x_margin/y_margin = right_side (waypoint) hoặc margin (pickup).
 """
 
@@ -15,19 +18,21 @@ import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.services.pickup_locations_store import list_pickup_locations_admin
-from app.services.robot_waypoints_dataset_store import get_waypoints_dataset
+from app.services.robot_waypoints_dataset_store import get_waypoints_bundle
 
 
 def _euclid(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def _dijkstra(
-    n: int,
-    dist_fn: Any,
+def _dijkstra_sparse(
+    adj: List[List[Tuple[int, float]]],
     src: int,
     dst: int,
 ) -> Optional[List[int]]:
+    n = len(adj)
+    if src < 0 or src >= n or dst < 0 or dst >= n:
+        return None
     if src == dst:
         return [src]
     dist: Dict[int, float] = {src: 0.0}
@@ -39,10 +44,8 @@ def _dijkstra(
             continue
         if u == dst:
             break
-        for v in range(n):
-            if v == u:
-                continue
-            nd = d + dist_fn(u, v)
+        for v, w in adj[u]:
+            nd = d + w
             if nd < dist.get(v, math.inf):
                 dist[v] = nd
                 prev[v] = u
@@ -75,16 +78,86 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
     if sid not in by_pid or eid not in by_pid:
         return None
 
-    wps = get_waypoints_dataset()
-    if wps is None:
-        wps = []
+    bundle = get_waypoints_bundle()
+    wps = bundle.get("waypoints") or []
+    edges = bundle.get("edges") or []
+    portals = bundle.get("pickup_portal_edges") or []
 
-    # nodes: [start_pickup, ...wp centers..., end_pickup] — end luôn index cuối
-    nodes_meta: List[Dict[str, Any]] = []
-    pts: List[Tuple[float, float]] = []
+    if not wps:
+        return None
+
+    # Chỉ các waypoint có center/right_side hợp lệ (đã lọc bởi store)
+    wp_list: List[Dict[str, Any]] = list(wps)
+    wp_ids = [str(w["id"]) for w in wp_list]
+    id_to_wp = {str(w["id"]): w for w in wp_list}
+    w = len(wp_ids)
+    if w == 0:
+        return None
+
+    # Chỉ số: 0 = start pickup, 1..w = waypoint theo thứ tự wp_list, w+1 = end pickup
+    SRC = 0
+    DST = w + 1
+    n = w + 2
+    adj: List[List[Tuple[int, float]]] = [[] for _ in range(n)]
+
+    def wp_index(wid: str) -> int:
+        return 1 + wp_ids.index(wid)
+
+    def center_xy(meta: Dict[str, Any]) -> Optional[Tuple[float, float]]:
+        c = meta.get("center") or {}
+        try:
+            return (float(c["x"]), float(c["y"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def add_edge(u: int, v: int, d: float) -> None:
+        if not math.isfinite(d) or d <= 0:
+            return
+        adj[u].append((v, d))
+        adj[v].append((u, d))
+
+    # Cạnh waypoint–waypoint
+    for pair in edges:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        a, b = str(pair[0]), str(pair[1])
+        if a not in id_to_wp or b not in id_to_wp:
+            continue
+        pa = center_xy(id_to_wp[a])
+        pb = center_xy(id_to_wp[b])
+        if pa is None or pb is None:
+            continue
+        ia, ib = wp_index(a), wp_index(b)
+        add_edge(ia, ib, _euclid(pa, pb))
 
     sp = by_pid[sid]
-    nodes_meta.append(
+    ep = by_pid[eid]
+    start_pt = (float(sp["x"]), float(sp["y"]))
+    end_pt = (float(ep["x"]), float(ep["y"]))
+
+    # Cổng pickup ↔ waypoint
+    for po in portals:
+        if not isinstance(po, dict):
+            continue
+        pid = str(po.get("pickup_id", "")).strip()
+        wid = str(po.get("waypoint_id", "")).strip()
+        if wid not in id_to_wp:
+            continue
+        wpt = id_to_wp[wid]
+        wc = center_xy(wpt)
+        if wc is None:
+            continue
+        wi = wp_index(wid)
+        if pid == sid:
+            add_edge(SRC, wi, _euclid(start_pt, wc))
+        if pid == eid:
+            add_edge(wi, DST, _euclid(wc, end_pt))
+
+    path_idx = _dijkstra_sparse(adj, SRC, DST)
+    if path_idx is None:
+        return None
+
+    nodes_meta: List[Dict[str, Any]] = [
         {
             "kind": "pickup",
             "id": sid,
@@ -94,34 +167,22 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
             "mx": float(sp.get("x_margin", sp["x"])),
             "my": float(sp.get("y_margin", sp["y"])),
         }
-    )
-    pts.append((float(sp["x"]), float(sp["y"])))
-
-    for wp in wps:
-        wid = str(wp["id"])
+    ]
+    for wid in wp_ids:
+        wp = id_to_wp[wid]
         c = wp.get("center") or {}
         rs = wp.get("right_side") or {}
-        try:
-            cx = float(c["x"])
-            cy = float(c["y"])
-            mx = float(rs["x"])
-            my = float(rs["y"])
-        except (KeyError, TypeError, ValueError):
-            continue
         nodes_meta.append(
             {
                 "kind": "waypoint",
                 "id": wid,
                 "name": str(wp.get("name", wid)),
-                "cx": cx,
-                "cy": cy,
-                "mx": mx,
-                "my": my,
+                "cx": float(c["x"]),
+                "cy": float(c["y"]),
+                "mx": float(rs["x"]),
+                "my": float(rs["y"]),
             }
         )
-        pts.append((cx, cy))
-
-    ep = by_pid[eid]
     nodes_meta.append(
         {
             "kind": "pickup",
@@ -133,22 +194,6 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
             "my": float(ep.get("y_margin", ep["y"])),
         }
     )
-    pts.append((float(ep["x"]), float(ep["y"])))
-
-    n = len(pts)
-    # Cần ít nhất: điểm đầu + 1 waypoint + điểm cuối (không cho đi thẳng pickup→pickup).
-    if n < 3:
-        return None
-
-    def dist_uv(u: int, v: int) -> float:
-        # Cấm cạnh trực tiếp điểm đầu → điểm cuối — robot phải đi qua ít nhất một waypoint.
-        if u == 0 and v == n - 1:
-            return math.inf
-        return _euclid(pts[u], pts[v])
-
-    path_idx = _dijkstra(n, dist_uv, 0, n - 1)
-    if path_idx is None:
-        return None
 
     ordered_meta = [nodes_meta[i] for i in path_idx]
     ordered_stops: List[Dict[str, Any]] = []
@@ -174,7 +219,12 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
         smx.append(st["mx"])
         smy.append(st["my"])
 
-    total_len = sum(dist_uv(path_idx[i], path_idx[i + 1]) for i in range(len(path_idx) - 1))
+    def edge_len(u: int, v: int) -> float:
+        pu = (nodes_meta[u]["cx"], nodes_meta[u]["cy"])
+        pv = (nodes_meta[v]["cx"], nodes_meta[v]["cy"])
+        return _euclid(pu, pv)
+
+    total_len = sum(edge_len(path_idx[i], path_idx[i + 1]) for i in range(len(path_idx) - 1))
 
     return {
         "ordered_stops": ordered_stops,

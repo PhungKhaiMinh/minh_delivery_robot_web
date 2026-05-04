@@ -42,7 +42,11 @@ from app.services.pickup_locations_store import (
     list_pickup_locations_admin,
     set_pickup_xy_overrides,
 )
-from app.services.robot_waypoints_dataset_store import get_waypoints_dataset, set_waypoints_dataset
+from app.services.robot_waypoints_dataset_store import (
+    get_waypoints_bundle,
+    set_waypoint_traversal_graph,
+    set_waypoints_dataset,
+)
 from app.services.admin_route_planner import plan_field_route
 from app.services.rtab_map_graph_service import (
     build_rtab_graph_json,
@@ -300,8 +304,9 @@ async def admin_test_route_plan(request: Request):
                 "success": False,
                 "message": (
                     "Không hoạch định được: kiểm tra id đầu/cuối khác nhau, catalog pickup, "
-                    "và dataset waypoint có ít nhất một waypoint (center + right_side hợp lệ). "
-                    "Lộ trình bắt buộc đi qua waypoint — không có đoạn thẳng chỉ từ điểm đầu tới điểm cuối."
+                    "dataset waypoint (center + right_side), và đồ thị đi đường trên trang Tracking: "
+                    "cần cạnh waypoint–waypoint + cổng pickup↔waypoint nối điểm đầu/cuối tới đồ thị "
+                    "(Dijkstra chỉ đi theo cạnh đã định nghĩa)."
                 ),
             },
         )
@@ -451,34 +456,59 @@ async def admin_gps_to_local(request: Request):
 
 @router.get("/waypoints-dataset")
 async def admin_get_waypoints_dataset(request: Request):
-    """Danh sách waypoint (id, name, kind, x, y) lưu trên server."""
+    """Waypoint + edges (waypoint–waypoint) + pickup_portal_edges (pickup↔waypoint)."""
     require_admin(request)
-    return JSONResponse(content={"success": True, "waypoints": get_waypoints_dataset()})
+    bundle = get_waypoints_bundle()
+    return JSONResponse(content={"success": True, **bundle})
 
 
 @router.put("/waypoints-dataset")
 async def admin_put_waypoints_dataset(request: Request):
-    """Thay thế toàn bộ dataset waypoint (tối đa 500 điểm)."""
+    """Cập nhật waypoint và/hoặc đồ thị đi đường (edges + pickup_portal_edges)."""
     require_admin(request)
     try:
         body = await request.json()
     except Exception:
         body = {}
     raw = body.get("waypoints")
-    if not isinstance(raw, list):
+    if isinstance(raw, list):
+        if not set_waypoints_dataset(raw):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": (
+                        "Dữ liệu không hợp lệ: mỗi waypoint cần id (chữ, số, _,-), tên, "
+                        "center {x,y} và right_side {x,y} (số hợp lệ); không trùng id."
+                    ),
+                },
+            )
+    elif raw is not None:
         return JSONResponse(
             status_code=400,
-            content={"success": False, "message": "Thiếu hoặc sai kiểu trường waypoints (mảng)."},
+            content={"success": False, "message": "Trường waypoints phải là mảng hoặc bỏ qua."},
         )
-    if not set_waypoints_dataset(raw):
+
+    if "edges" in body or "pickup_portal_edges" in body:
+        edges = body["edges"] if "edges" in body else get_waypoints_bundle()["edges"]
+        portals = (
+            body["pickup_portal_edges"]
+            if "pickup_portal_edges" in body
+            else get_waypoints_bundle()["pickup_portal_edges"]
+        )
+        if not set_waypoint_traversal_graph(edges, portals):
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "message": "Lưu đồ thị waypoint thất bại."},
+            )
+
+    if not isinstance(raw, list) and "edges" not in body and "pickup_portal_edges" not in body:
         return JSONResponse(
             status_code=400,
             content={
                 "success": False,
-                "message": (
-                    "Dữ liệu không hợp lệ: mỗi waypoint cần id (chữ, số, _,-), tên, "
-                    "center {x,y} và right_side {x,y} (số hợp lệ); không trùng id."
-                ),
+                "message": "Cần waypoints (mảng) và/hoặc edges / pickup_portal_edges.",
             },
         )
-    return JSONResponse(content={"success": True, "waypoints": get_waypoints_dataset()})
+
+    return JSONResponse(content={"success": True, **get_waypoints_bundle()})
