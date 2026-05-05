@@ -756,7 +756,7 @@ function adminSettings(cfg) {
             if (!this._client || this.conn !== 'connected') return;
             var payload = buildParaPayload(this.losPara);
             if (Object.keys(payload).length === 0) {
-                this.losError = 'Nhập ít nhất một tham số.';
+                this.losError = 'Nhập ít nhất một tham số';
                 this.losOk = '';
                 return;
             }
