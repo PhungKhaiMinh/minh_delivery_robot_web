@@ -21,6 +21,7 @@
     "wsUrl": mqtt_ws_url,
     "clientPrefix": mqtt_client_prefix,
     "topicPose": mqtt_topic_pose,
+    "topicAvoidanceWp": mqtt_topic_avoidance_waypoint,
     "mqttUser": mqtt_username,
     "mqttPass": mqtt_password,
     "graphUrl": "/api/admin/rtab-map/graph?env=1&raster=1&use_opt_map=1",
@@ -124,7 +125,23 @@
             </span>
         </div>
     </div>
-    <p class="text-xs text-slate-400">Pose: <code>{"x":0.0,"y":0.0,"yaw":0.0}</code> — cùng khung với mặt phẳng map RTAB (tx, ty từ pose 3×4).</p>
+
+    <div class="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 space-y-2" x-show="mapReady">
+        <h2 class="text-sm font-bold text-amber-900">Né vật cản — <span class="font-mono text-xs text-amber-800" x-text="topicAvoidLabel"></span></h2>
+        <p class="text-xs text-amber-900/90 leading-relaxed">
+            Waypoint sinh khi gặp chướng ngại vật (theo robot). Cập nhật realtime trên map (đường cam nét đứt + điểm).
+            Rời trang Tracking thì lớp này bị xóa — quay lại sẽ trống cho đến khi có tin MQTT mới.
+        </p>
+        <div class="flex flex-wrap gap-4 text-xs text-amber-950">
+            <span><strong>has_waypoint</strong>: <span class="font-mono" x-text="avoidHasWaypoint === null ? '—' : avoidHasWaypoint"></span></span>
+            <span><strong>has_avoid_obstacles</strong>: <span class="font-mono" x-text="avoidHasObstacles === null ? '—' : avoidHasObstacles"></span></span>
+            <span><strong>Số điểm</strong>: <span class="font-mono" x-text="avoidWpCount"></span></span>
+            <span class="text-amber-800" x-show="avoidLastAt">Cập nhật: <span x-text="avoidLastAt"></span></span>
+        </div>
+        <pre class="text-[11px] font-mono bg-white/90 border border-amber-100 rounded-lg p-3 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap" x-text="avoidJsonPretty || '— (chưa nhận payload)'"></pre>
+    </div>
+
+    <p class="text-xs text-slate-400">Pose: <code>{"x":0.0,"y":0.0,"yaw":0.0}</code> — cùng hệ mét với map; vị trí / hướng vẽ khớp graph RTAB (lật Y + điều chỉnh yaw hiển thị).</p>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -170,7 +187,7 @@
 
     /**
      * Lật graph theo trục dọc trên mặt phẳng world: đối xứng qua đường ngang giữa bounds (y' = ymin + ymax - y).
-     * Chỉ dùng cho hiển thị node/cạnh xanh; robot và MQTT giữ tọa độ gốc.
+     * Dùng cho node/link RTAB, waypoint, pickup và **robot + quỹ đạo** để khớp PNG / opt_map.
      */
     function graphDisplayWorldY(wy, bb) {
         return bb.ymin + bb.ymax - wy;
@@ -183,6 +200,11 @@
 
     function mapLatLngToWorld(ll, bb) {
         return [ll.lng + bb.xmin, bb.ymax - ll.lat];
+    }
+
+    /** Inverse của rtabGraphAlignWorldToMapLL — dùng cho quỹ đạo (điểm đã vẽ theo graph align). */
+    function mapGraphAlignedLatLngToWorld(ll, bb) {
+        return [ll.lng + bb.xmin, ll.lat + bb.ymin];
     }
 
     /**
@@ -217,6 +239,8 @@
         var canvasRenderer = null;
         var wpUserLayer = null;
         var wpEdgeLayer = null;
+        var avoidWpLayer = null;
+        var topicAvoidanceWp = cfg.topicAvoidanceWp || 'UGV/avoidance/waypoint';
 
         function updateRobotIcon() {
             if (!robotMarker) return;
@@ -230,11 +254,12 @@
 
         function poseToMapLL(nx, ny) {
             if (!graphBounds) return null;
-            return worldToMapLatLng(nx, ny, graphBounds);
+            return rtabGraphAlignWorldToMapLL(nx, ny, graphBounds);
         }
 
         return {
             topicPoseLabel: topicPose,
+            topicAvoidLabel: topicAvoidanceWp,
             dbLabel: cfg.rtabDbLabel || 'A5_night.db',
             conn: 'disconnected',
             connLabel: 'Chưa kết nối',
@@ -257,6 +282,11 @@
             edges: [],
             pickupPortalEdges: [],
             pendingFrom: null,
+            avoidHasWaypoint: null,
+            avoidHasObstacles: null,
+            avoidWpCount: 0,
+            avoidLastAt: '',
+            avoidJsonPretty: '',
 
             init: function () {
                 var self = this;
@@ -286,6 +316,9 @@
                 /* Leaflet: không gọi L.map() hai lần trên cùng #admin-map (race khi init/async). */
                 if (map !== null && graphBounds) {
                     self.graphErr = '';
+                    if (map && !avoidWpLayer) {
+                        avoidWpLayer = L.layerGroup().addTo(map);
+                    }
                     await self._loadWaypointGraphOverlay();
                     return;
                 }
@@ -432,6 +465,7 @@
                     opacity: 0.88,
                     lineJoin: 'round',
                 }).addTo(map);
+                avoidWpLayer = L.layerGroup().addTo(map);
 
                 var startLL = worldToMapLatLng((b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, b);
                 robotMarker = L.marker(startLL, {
@@ -448,6 +482,16 @@
 
                 await self._loadWaypointGraphOverlay();
 
+                self._clearAvoidanceOnLeave = function () {
+                    if (avoidWpLayer) avoidWpLayer.clearLayers();
+                    self.avoidHasWaypoint = null;
+                    self.avoidHasObstacles = null;
+                    self.avoidWpCount = 0;
+                    self.avoidLastAt = '';
+                    self.avoidJsonPretty = '';
+                };
+                window.addEventListener('pagehide', self._clearAvoidanceOnLeave);
+
                 var client = window.AdminMqtt.connect('', '', function (state, detail) {
                     self.conn = state;
                     self.errDetail = detail || '';
@@ -455,11 +499,75 @@
                     self.connLabel = labels[state] || state;
                     if (state === 'connected' && client) {
                         client.subscribe(topicPose, { qos: 0 });
+                        client.subscribe(topicAvoidanceWp, { qos: 0 });
                     }
                 });
 
                 if (client) {
                     client.on('message', function (t, msg) {
+                        if (t === topicAvoidanceWp) {
+                            var rawAw = msg.toString();
+                            var aw = window.AdminMqtt.safeParseJson(rawAw);
+                            self.avoidJsonPretty = aw ? JSON.stringify(aw, null, 2) : rawAw;
+                            self.avoidLastAt = new Date().toLocaleTimeString('vi-VN');
+                            if (avoidWpLayer) avoidWpLayer.clearLayers();
+                            if (!aw || typeof aw !== 'object') {
+                                self.avoidHasWaypoint = null;
+                                self.avoidHasObstacles = null;
+                                self.avoidWpCount = 0;
+                                return;
+                            }
+                            if (aw.has_waypoint !== undefined && aw.has_waypoint !== null) {
+                                self.avoidHasWaypoint = Boolean(aw.has_waypoint);
+                            } else {
+                                self.avoidHasWaypoint = null;
+                            }
+                            var ho = aw.has_avoid_obstacles;
+                            if (ho === undefined || ho === null) ho = aw.has_obstacles;
+                            if (ho !== undefined && ho !== null) {
+                                self.avoidHasObstacles = Boolean(ho);
+                            } else {
+                                self.avoidHasObstacles = null;
+                            }
+                            var xs = aw.wp_x, ys = aw.wp_y;
+                            if (!Array.isArray(xs) || !Array.isArray(ys) || !graphBounds || !avoidWpLayer) {
+                                self.avoidWpCount = 0;
+                                return;
+                            }
+                            var n = Math.min(xs.length, ys.length);
+                            self.avoidWpCount = n;
+                            if (n === 0) return;
+                            var latlngs = [];
+                            for (var ai = 0; ai < n; ai++) {
+                                var ax = Number(xs[ai]), ay = Number(ys[ai]);
+                                if (isNaN(ax) || isNaN(ay)) continue;
+                                var all = poseToMapLL(ax, ay);
+                                if (!all) continue;
+                                latlngs.push({ ll: all, ax: ax, ay: ay });
+                            }
+                            if (latlngs.length > 1) {
+                                L.polyline(latlngs.map(function (q) { return q.ll; }), {
+                                    color: '#d97706',
+                                    weight: 3,
+                                    opacity: 0.9,
+                                    dashArray: '10,8',
+                                    lineCap: 'round',
+                                    lineJoin: 'round',
+                                }).addTo(avoidWpLayer);
+                            }
+                            latlngs.forEach(function (q) {
+                                L.circleMarker(q.ll, {
+                                    radius: 5,
+                                    color: '#b45309',
+                                    weight: 2,
+                                    fillColor: '#fbbf24',
+                                    fillOpacity: 0.95,
+                                }).addTo(avoidWpLayer).bindPopup(
+                                    '<div class="text-xs font-mono">né vật cản<br>x=' + q.ax.toFixed(4) + ' y=' + q.ay.toFixed(4) + ' m</div>'
+                                );
+                            });
+                            return;
+                        }
                         if (t !== topicPose) return;
                         var raw = msg.toString();
                         var o = window.AdminMqtt.safeParseJson(raw);
@@ -472,7 +580,7 @@
                         self.poseY = ny.toFixed(4);
                         self.poseYaw = yw != null ? yw.toFixed(4) : '—';
 
-                        var deg = yw != null ? (yw * 180 / Math.PI) : null;
+                        var deg = yw != null ? (-(yw * 180 / Math.PI)) : null;
                         currentHeadingDeg = deg;
                         updateRobotIcon();
 
@@ -483,7 +591,7 @@
                         var dominated = false;
                         if (trailCoords.length > 0) {
                             var prev = trailCoords[trailCoords.length - 1];
-                            var pw = mapLatLngToWorld(prev, b);
+                            var pw = mapGraphAlignedLatLngToWorld(prev, b);
                             var d = haversineMeters(pw, [nx, ny]);
                             if (d < MIN_TRAIL_DIST) dominated = true;
                         }

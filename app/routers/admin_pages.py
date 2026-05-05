@@ -20,6 +20,7 @@ from app.config import (
     MQTT_TOPIC_TELEMETRY,
     MQTT_TOPIC_POSITION,
     MQTT_UGV_TOPIC_POSE,
+    MQTT_UGV_TOPIC_AVOIDANCE_WAYPOINT,
     MQTT_TOPIC_MOTORS,
     MQTT_TOPIC_COMMAND,
     MQTT_TOPIC_CONTROL,
@@ -134,6 +135,7 @@ async def admin_tracking(request: Request):
         "campus_origin_lat": CAMPUS_ORIGIN_LAT,
         "campus_origin_lon": CAMPUS_ORIGIN_LON,
         "mqtt_topic_pose": MQTT_UGV_TOPIC_POSE,
+        "mqtt_topic_avoidance_waypoint": MQTT_UGV_TOPIC_AVOIDANCE_WAYPOINT,
         "rtab_map_db_path": RTAB_MAP_DB_PATH,
         **_mqtt_ctx(),
     }

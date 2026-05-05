@@ -147,7 +147,11 @@
     <!-- Tham số điều khiển -->
     <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
         <h2 class="text-sm font-bold text-slate-800 mb-2">UGV/control/para</h2>
-        <p class="text-xs text-slate-500 mb-3">Payload JSON gần nhất (theo firmware).</p>
+        <p class="text-xs text-slate-500 mb-2">Payload JSON gần nhất (theo firmware).</p>
+        <p class="text-xs text-slate-700 mb-3">
+            <span class="font-semibold">look_ahead</span>:
+            <span class="font-mono text-slate-900" x-text="formatCoordDisplay(paraLookAhead)"></span>
+        </p>
         <pre class="text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-x-auto whitespace-pre-wrap min-h-[4rem]" x-text="paraJson || '—'"></pre>
     </div>
 
@@ -224,6 +228,7 @@
             hasMoving: null,
             hasArrival: null,
             paraJson: '',
+            paraLookAhead: null,
             _client: null,
             _topicToKey: {},
 
@@ -295,6 +300,7 @@
                         } catch (e) {
                             this.paraJson = String(o);
                         }
+                        this.paraLookAhead = pickNum(o.look_ahead, o.lookAhead);
                         touch();
                         break;
                     case 'byte_per_sec':
