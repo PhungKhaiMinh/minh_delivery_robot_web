@@ -32,6 +32,7 @@ from app.config import (
     RTAB_MAP_OPT_MAP_MAX_PIXELS,
     RTAB_MAP_OPT_MAP_MAX_SIDE,
     RTAB_MAP_OPT_MAP_INVERT_GREY,
+    RTAB_MAP_OPT_MAP_VIEWER_PALETTE,
 )
 
 
@@ -161,6 +162,24 @@ def _occ_byte_to_grey(v: int) -> int:
     return 38
 
 
+def _occ_byte_to_rtab_viewer_grey(v: int) -> int:
+    """
+    Giống Grid Map / rtabmap-viewer: 0 = free (sáng), 100 = tường (đen),
+    255 = unknown (xám đậm), 1–99 = ramp xác suất chiếm.
+    Không cần bước invert — tránh toàn bản đồ thành nền đen khi invert tắt/sai.
+    """
+    if v == 255:
+        return 72
+    if v == 0:
+        return 220
+    if v == 100:
+        return 12
+    if 1 <= v <= 99:
+        t = v / 100.0
+        return int(220 * (1.0 - t) + 12 * t)
+    return 80
+
+
 def _opt_map_upscale_factor(cols: int, rows: int) -> int:
     """Integer nearest-neighbor scale sao cho không vượt max cạnh / max pixel (payload hợp lý)."""
     max_side = max(512, RTAB_MAP_OPT_MAP_MAX_SIDE)
@@ -260,12 +279,15 @@ def _try_load_admin_opt_map_surface(
         else:
             iy = r
         for c in range(n_cols):
-            grey[iy * n_cols + c] = _occ_byte_to_grey(raw[base + c])
+            if RTAB_MAP_OPT_MAP_VIEWER_PALETTE:
+                grey[iy * n_cols + c] = _occ_byte_to_rtab_viewer_grey(raw[base + c])
+            else:
+                grey[iy * n_cols + c] = _occ_byte_to_grey(raw[base + c])
     # Không dilate: giữ biên ô occupancy sắc như Graph View; upscale sau để zoom web mịn.
     grey_b = bytes(grey)
     sc = _opt_map_upscale_factor(n_cols, n_rows)
     nw, nh, grey_b = _nearest_upscale_grey8(grey_b, n_cols, n_rows, sc)
-    if RTAB_MAP_OPT_MAP_INVERT_GREY:
+    if not RTAB_MAP_OPT_MAP_VIEWER_PALETTE and RTAB_MAP_OPT_MAP_INVERT_GREY:
         grey_b = bytes(255 - v for v in grey_b)
     return nw, nh, grey_b, bmap
 
@@ -471,6 +493,41 @@ def _raster_env_to_grey_bytes(
     return cw, ch, bytes(out3)
 
 
+def _node_trajectory_world_xy(
+    con: sqlite3.Connection,
+    positions: Dict[int, Tuple[float, float]],
+    max_points: int = 12000,
+) -> List[List[float]]:
+    """Thứ tự thời gian mapping (stamp / time_enter / id) → polyline vàng như rtabmap-viewer."""
+    if not positions:
+        return []
+    try:
+        cols = [r[1] for r in con.execute("PRAGMA table_info(Node)")]
+    except sqlite3.Error:
+        return []
+    if "stamp" in cols:
+        order_sql = "stamp ASC, id ASC"
+    elif "time_enter" in cols:
+        order_sql = "time_enter ASC, id ASC"
+    else:
+        order_sql = "id ASC"
+    out: List[List[float]] = []
+    try:
+        cur = con.execute(f"SELECT id FROM Node WHERE pose IS NOT NULL ORDER BY {order_sql}")
+        for (nid,) in cur:
+            nid_i = int(nid)
+            p = positions.get(nid_i)
+            if not p:
+                continue
+            out.append([p[0], p[1]])
+    except sqlite3.Error:
+        return []
+    if len(out) > max_points:
+        step = max(1, (len(out) + max_points - 1) // max_points)
+        out = [out[i] for i in range(0, len(out), step)]
+    return out
+
+
 def build_rtab_graph_json(
     db_path: Optional[str] = None,
     include_environment: bool = True,
@@ -578,6 +635,8 @@ def build_rtab_graph_json(
             for nid in sorted(positions.keys())
         ]
 
+        trajectory_xy = _node_trajectory_world_xy(con, positions, max_points=12000)
+
         env_points: List[List[float]] = []
         env_nodes_used = 0
         env_pairs = 0
@@ -649,6 +708,7 @@ def build_rtab_graph_json(
             "bounds": bounds,
             "nodes": nodes_out,
             "links": links,
+            "trajectory": trajectory_xy,
             "source": path.name,
             "env_points": env_points,
             "env_nodes_sampled": env_nodes_used,
