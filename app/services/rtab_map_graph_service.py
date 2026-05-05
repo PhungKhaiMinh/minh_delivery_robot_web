@@ -28,6 +28,7 @@ from app.config import (
     RTAB_MAP_DB_MAX_BYTES,
     RTAB_MAP_DB_PATH,
     RTAB_MAP_ENV_MAX_POINTS,
+    RTAB_MAP_ENV_MAX_POINTS_NO_OPT_MAP,
     RTAB_MAP_ENV_RASTER_MAX_SIDE,
     RTAB_MAP_OPT_MAP_MAX_PIXELS,
     RTAB_MAP_OPT_MAP_MAX_SIDE,
@@ -411,6 +412,9 @@ def _raster_env_to_grey_bytes(
     env_points: List[List[float]],
     bounds: Dict[str, float],
     max_side: int,
+    *,
+    accum_step: int = 16,
+    extra_dilate: bool = False,
 ) -> Optional[Tuple[int, int, bytes]]:
     """Tích lũy điểm vào lưới greyscale 8-bit (PNG), trả (cw, ch, pixels) hoặc None."""
     if not env_points or max_side < 64:
@@ -431,7 +435,7 @@ def _raster_env_to_grey_bytes(
     cw = max(1, min(cw, max_side))
     ch = max(1, min(ch, max_side))
     acc = bytearray(cw * ch)
-    step = 16
+    step = max(8, min(40, int(accum_step)))
     for q in env_points:
         try:
             wx, wy = float(q[0]), float(q[1])
@@ -490,7 +494,31 @@ def _raster_env_to_grey_bytes(
                     boost = m - 16 if (dy != 0 or dx != 0) else m
                     if boost > 0:
                         out3[nk] = min(255, max(out3[nk], boost))
-    return cw, ch, bytes(out3)
+    grey3 = bytes(out3)
+    if not extra_dilate:
+        return cw, ch, grey3
+    # Thêm một vòng giãn mỏng — laser thưa (không có Admin.opt_map) cho khối tường liền hơn.
+    out4 = bytearray(grey3)
+    for y in range(ch):
+        for x in range(cw):
+            k = y * cw + x
+            m = int(grey3[k])
+            if m < 40:
+                continue
+            for dy in (-2, -1, 0, 1, 2):
+                yy = y + dy
+                if yy < 0 or yy >= ch:
+                    continue
+                base = yy * cw
+                for dx in (-2, -1, 0, 1, 2):
+                    xx = x + dx
+                    if xx < 0 or xx >= cw:
+                        continue
+                    nk = base + xx
+                    boost = m - 28 if (dx != 0 or dy != 0) else m
+                    if boost > 0:
+                        out4[nk] = min(255, max(out4[nk], boost))
+    return cw, ch, bytes(out4)
 
 
 def _node_trajectory_world_xy(
@@ -579,6 +607,7 @@ def build_rtab_graph_json(
             and include_raster
             and include_environment
         )
+        admin_opt_map_available = opt_surface is not None
 
         positions: Dict[int, Tuple[float, float]] = {}
         cur = con.execute("SELECT id, pose FROM Node WHERE pose IS NOT NULL")
@@ -642,9 +671,11 @@ def build_rtab_graph_json(
         env_pairs = 0
         if include_environment and not use_admin_raster:
             try:
-                env_points, env_nodes_used, env_pairs = _collect_env_xy_points(
-                    con, max_points=max(4000, min(RTAB_MAP_ENV_MAX_POINTS, 400000))
-                )
+                if admin_opt_map_available:
+                    env_cap = max(4000, min(RTAB_MAP_ENV_MAX_POINTS, 400000))
+                else:
+                    env_cap = max(8000, min(RTAB_MAP_ENV_MAX_POINTS_NO_OPT_MAP, 2_000_000))
+                env_points, env_nodes_used, env_pairs = _collect_env_xy_points(con, max_points=env_cap)
             except (sqlite3.Error, struct.error, zlib.error, MemoryError):
                 env_points = []
 
@@ -686,10 +717,13 @@ def build_rtab_graph_json(
                     env_raster_source = ""
             elif env_points:
                 try:
+                    acc_step = 30 if len(env_points) > 150000 else 22
                     rast = _raster_env_to_grey_bytes(
                         env_points,
                         bounds,
                         max(256, min(8192, RTAB_MAP_ENV_RASTER_MAX_SIDE)),
+                        accum_step=acc_step,
+                        extra_dilate=not admin_opt_map_available,
                     )
                     if rast is not None:
                         cw_r, ch_r, grey = rast
@@ -719,6 +753,7 @@ def build_rtab_graph_json(
             "env_raster_source": env_raster_source,
             "opt_map_bounds": opt_map_bounds,
             "optimized_graph_only": use_admin_raster,
+            "admin_opt_map_available": admin_opt_map_available,
         }
     except sqlite3.Error as exc:
         return {

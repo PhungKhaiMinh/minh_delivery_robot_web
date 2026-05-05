@@ -65,6 +65,13 @@
 
     <p class="text-sm text-red-600 font-medium" x-show="graphErr" x-text="graphErr"></p>
     <p class="text-xs text-slate-500" x-show="graphMeta && !graphErr" x-text="graphMeta"></p>
+    <div class="rounded-xl border border-amber-400 bg-amber-50 p-4 text-sm text-amber-950 space-y-2 leading-relaxed"
+        x-show="graphOptMapMissing && !graphErr">
+        <p class="font-bold">Thiếu <code class="text-xs bg-amber-100 px-1 rounded font-mono">Admin.opt_map</code> trong file .db</p>
+        <p class="text-xs">RTAB-Map Viewer hiển thị <strong>lưới occupancy 2D</strong> lưu sau tối ưu graph (cột <code class="font-mono">Admin.opt_map</code>). File map trên server <strong>không có</strong> blob này (NULL) — web buộc dựng PNG từ <strong>điểm laser</strong> (<code class="font-mono">point_accum</code>), nên hình dạng / độ đặc <strong>không thể giống y chang</strong> viewer.</p>
+        <p class="text-xs"><strong>Để khớp viewer:</strong> mở cùng file <code class="font-mono">.db</code> trong RTAB-Map Desktop → Graph View / tối ưu graph → <strong>File → Save</strong> (hoặc xuất DB) để ghi <code class="font-mono">opt_map</code> vào bảng <code class="font-mono">Admin</code>, rồi dùng file đã lưu cho <code class="font-mono">RTAB_MAP_DB_PATH</code>.</p>
+        <p class="text-xs text-amber-900/90">Đã tăng ngân sách điểm laser và làm đặc raster khi thiếu <code class="font-mono">opt_map</code> — chỉ là xấp xỉ.</p>
+    </div>
 
     <div class="rounded-2xl border border-violet-200 bg-violet-50/80 p-4 space-y-3" x-show="mapReady">
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -277,6 +284,7 @@
             graphSaving: false,
             graphLoadErr: '',
             graphSaveOk: '',
+            graphOptMapMissing: false,
             waypointsRaw: [],
             pickupsRaw: [],
             edges: [],
@@ -325,9 +333,11 @@
                 var res = await fetch(graphUrl, { credentials: 'same-origin' });
                 var graph = await res.json().catch(function () { return null; });
                 if (!graph || !graph.success) {
+                    self.graphOptMapMissing = false;
                     self.graphErr = (graph && graph.message) || 'API graph không hợp lệ';
                     return;
                 }
+                self.graphOptMapMissing = graph.admin_opt_map_available === false;
                 graphBounds = graph.bounds;
                 self.graphErr = '';
                 var b = graphBounds;
@@ -341,7 +351,8 @@
                     (graph.optimized_graph_only ? ' (graph khớp opt_map)' : '') +
                     (rw > 0
                         ? (', môi trường PNG ' + rw + '×' + rh +
-                            (graph.env_raster_source === 'admin_opt_map' ? ' (Admin opt_map)' : ''))
+                            (graph.env_raster_source === 'admin_opt_map' ? ' (Admin opt_map)' :
+                                (graph.admin_opt_map_available === false ? ' (laser — thiếu Admin.opt_map)' : '')))
                         : (envN ? (', ' + envN + ' điểm env (raw)') : ''));
 
                 map = L.map('admin-map', {

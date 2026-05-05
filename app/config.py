@@ -198,6 +198,8 @@ else:
     RTAB_MAP_DB_MAX_BYTES = int(_rtab_max_raw)
 # Điểm môi trường (laser / obstacle) dùng khi build raster / hoặc gửi raw khi raster=0
 RTAB_MAP_ENV_MAX_POINTS = int(os.getenv("RTAB_MAP_ENV_MAX_POINTS", "280000"))
+# Khi DB **không có** Admin.opt_map (chưa lưu grid sau Graph Optimizer): lấy nhiều điểm laser hơn để raster xấp xỉ gần viewer hơn (tốn RAM/CPU hơn).
+RTAB_MAP_ENV_MAX_POINTS_NO_OPT_MAP = int(os.getenv("RTAB_MAP_ENV_MAX_POINTS_NO_OPT_MAP", "900000"))
 # Cạnh dài nhất (px) của PNG môi trường — tăng để gần độ mịn Graph View của RTAB-Map
 RTAB_MAP_ENV_RASTER_MAX_SIDE = int(os.getenv("RTAB_MAP_ENV_RASTER_MAX_SIDE", "4096"))
 # Admin.opt_map: upscale nearest-neighbor (cùng mét / pixel gốc) để zoom web sắc như Graph View
