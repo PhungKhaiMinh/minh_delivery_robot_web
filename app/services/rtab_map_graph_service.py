@@ -630,7 +630,7 @@ def build_rtab_graph_json(
                     rast = _raster_env_to_grey_bytes(
                         env_points,
                         bounds,
-                        max(256, min(4096, RTAB_MAP_ENV_RASTER_MAX_SIDE)),
+                        max(256, min(8192, RTAB_MAP_ENV_RASTER_MAX_SIDE)),
                     )
                     if rast is not None:
                         cw_r, ch_r, grey = rast

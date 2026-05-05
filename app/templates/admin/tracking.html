@@ -4,7 +4,7 @@
 {% block admin_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 <style>
-#admin-map { min-height: 560px; border-radius: 1rem; z-index: 1; background: #eceff1; }
+#admin-map { min-height: min(78vh, 920px); border-radius: 1rem; z-index: 1; background: #eceff1; }
 .leaflet-image-layer.rtab-env-raster {
     mix-blend-mode: normal;
     opacity: 1;
@@ -362,9 +362,10 @@
                 if (graph.env_raster_png_b64 && graph.env_raster_w > 0) {
                     if (graph.opt_map_bounds) {
                         var ob = graph.opt_map_bounds;
-                        /* NW world = (xmin, ymax), SE = (xmax, ymin) — khớp trục lat = ymax - wy (Leaflet CRS.Simple). */
-                        var nwCorner = worldToMapLatLng(ob.xmin, ob.ymax, b);
-                        var seCorner = worldToMapLatLng(ob.xmax, ob.ymin, b);
+                        /* Cùng quy ước Y với node/link/pose: graphDisplayWorldY rồi worldToMapLatLng — trước đây thiếu lật Y
+                           nên PNG opt_map bị co lệch / chỉ còn một dải nhỏ giữa map. */
+                        var nwCorner = worldToMapLatLng(ob.xmin, graphDisplayWorldY(ob.ymax, b), b);
+                        var seCorner = worldToMapLatLng(ob.xmax, graphDisplayWorldY(ob.ymin, b), b);
                         rasterBounds = L.latLngBounds(nwCorner, seCorner);
                     } else {
                         rasterBounds = L.latLngBounds(L.latLng(h, 0), L.latLng(0, w));
@@ -456,7 +457,8 @@
                     }
                 }
 
-                map.fitBounds(L.latLngBounds(L.latLng(h, 0), L.latLng(0, w)));
+                var fullBounds = L.latLngBounds(L.latLng(h, 0), L.latLng(0, w));
+                map.fitBounds(fullBounds, { padding: [24, 24], maxZoom: 18, animate: false });
                 wpUserLayer = L.layerGroup().addTo(map);
                 wpEdgeLayer = L.layerGroup().addTo(map);
                 trailLine = L.polyline([], {
