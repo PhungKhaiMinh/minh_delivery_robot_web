@@ -70,7 +70,7 @@
         <p class="font-bold">Thiếu <code class="text-xs bg-amber-100 px-1 rounded font-mono">Admin.opt_map</code> trong file .db</p>
         <p class="text-xs">RTAB-Map Viewer hiển thị <strong>lưới occupancy 2D</strong> lưu sau tối ưu graph (cột <code class="font-mono">Admin.opt_map</code>). File map trên server <strong>không có</strong> blob này (NULL) — web buộc dựng PNG từ <strong>điểm laser</strong> (<code class="font-mono">point_accum</code>), nên hình dạng / độ đặc <strong>không thể giống y chang</strong> viewer.</p>
         <p class="text-xs"><strong>Để khớp viewer:</strong> mở cùng file <code class="font-mono">.db</code> trong RTAB-Map Desktop → Graph View / tối ưu graph → <strong>File → Save</strong> (hoặc xuất DB) để ghi <code class="font-mono">opt_map</code> vào bảng <code class="font-mono">Admin</code>, rồi dùng file đã lưu cho <code class="font-mono">RTAB_MAP_DB_PATH</code>.</p>
-        <p class="text-xs text-amber-900/90">Đã tăng ngân sách điểm laser và làm đặc raster khi thiếu <code class="font-mono">opt_map</code> — chỉ là xấp xỉ.</p>
+        <p class="text-xs text-amber-900/90">Đã tăng ngân sách điểm laser và làm đặc raster khi thiếu <code class="font-mono">opt_map</code> — chỉ là xấp xỉ. <strong>Đã sửa lỗi trộn tọa độ:</strong> khi không có <code class="font-mono">opt_map</code>, graph và laser chỉ còn dùng <code class="font-mono">Node.pose</code> gốc (không lẫn <code class="font-mono">opt_poses</code>).</p>
     </div>
 
     <div class="rounded-2xl border border-violet-200 bg-violet-50/80 p-4 space-y-3" x-show="mapReady">

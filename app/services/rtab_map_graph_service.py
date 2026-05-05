@@ -618,13 +618,12 @@ def build_rtab_graph_json(
                     continue
                 positions[nid] = _tx_ty_from_pose12(opt_by_id[nid])
             else:
-                if nid in opt_by_id:
-                    positions[nid] = _tx_ty_from_pose12(opt_by_id[nid])
-                else:
-                    pt = _pose_tx_ty(bytes(pose))
-                    if pt is None:
-                        continue
-                    positions[nid] = pt
+                # Không có Admin.opt_map: **không** trộn opt_poses với Node.pose — hai hệ khác phạm vi
+                # (vd. map_cs1: raw ~49×85 m vs opt ~115×42 m) sẽ làm méo graph + laser. Chỉ dùng pose gốc.
+                pt = _pose_tx_ty(bytes(pose))
+                if pt is None:
+                    continue
+                positions[nid] = pt
 
         if not positions:
             return {
