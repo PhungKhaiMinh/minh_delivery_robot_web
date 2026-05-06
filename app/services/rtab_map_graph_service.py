@@ -434,21 +434,23 @@ def _raster_env_to_grey_bytes(
         cw = max(1, int(round(ch * ar)))
     cw = max(1, min(cw, max_side))
     ch = max(1, min(ch, max_side))
-    acc = bytearray(cw * ch)
+    # Nền ~#303030 (unknown) khớp viewer; không dùng 0 (đen thuần).
+    _POINT_ACCUM_BG = 48
+    _POINT_ACCUM_SKIP = _POINT_ACCUM_BG + 5
+    acc = bytearray([_POINT_ACCUM_BG] * (cw * ch))
     step = max(8, min(40, int(accum_step)))
     for q in env_points:
         try:
             wx, wy = float(q[0]), float(q[1])
         except (TypeError, ValueError, IndexError):
             continue
-        # Leaflet ImageOverlay: pixel row 0 = bounds NorthWest = max(lat) = ymax - wy → wy = ymin.
-        # Do not use (ymax - wy) here or the PNG is flipped vs CRS.Simple + graph polylines.
+        # Hàng ảnh 0 = mép Bắc overlay = world y lớn — cùng quy ước với graph (graphDisplayWorldY + Leaflet).
         ix = int((wx - xmin) / rw * (cw - 1))
-        iy = int((wy - ymin) / rh * (ch - 1))
+        iy = ch - 1 - int((wy - ymin) / rh * (ch - 1))
         if 0 <= ix < cw and 0 <= iy < ch:
             k = iy * cw + ix
             acc[k] = min(255, acc[k] + step)
-    if max(acc) == 0:
+    if max(acc) <= _POINT_ACCUM_BG:
         return None
     grey = bytes(acc)
     # Làm dày nhẹ (tường mảnh / laser thưa) — một bước hàng xóm
@@ -457,7 +459,7 @@ def _raster_env_to_grey_bytes(
         for x in range(cw):
             k = y * cw + x
             m = grey[k]
-            if m == 0:
+            if m <= _POINT_ACCUM_SKIP:
                 continue
             for dy in (-1, 0, 1):
                 yy = y + dy
@@ -479,7 +481,7 @@ def _raster_env_to_grey_bytes(
         for x in range(cw):
             k = y * cw + x
             m = grey2[k]
-            if m == 0:
+            if m <= _POINT_ACCUM_SKIP:
                 continue
             for dy in (-1, 0, 1):
                 yy = y + dy
@@ -503,7 +505,7 @@ def _raster_env_to_grey_bytes(
         for x in range(cw):
             k = y * cw + x
             m = int(grey3[k])
-            if m < 40:
+            if m <= _POINT_ACCUM_SKIP:
                 continue
             for dy in (-2, -1, 0, 1, 2):
                 yy = y + dy
