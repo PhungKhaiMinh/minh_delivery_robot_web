@@ -44,4 +44,6 @@ data/collections/
 
 # RTAB-Map DB — thường >100MB, GitHub từ chối; deploy bằng RTAB_MAP_DB_PATH hoặc volume
 A5_night.db
+# Point cloud PLY (local default PLY_MAP_PATH)
+cloud.ply
 map_cs1.db

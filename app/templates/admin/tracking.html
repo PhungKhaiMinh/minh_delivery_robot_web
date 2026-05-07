@@ -3,8 +3,18 @@
 
 {% block admin_head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
 <style>
-#admin-map { min-height: min(78vh, 920px); border-radius: 1rem; z-index: 1; background: #343434; }
+.map-stack { min-height: min(78vh, 920px); border-radius: 1rem; z-index: 1; background: #343434; }
+#admin-map { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; background: #343434; }
+#admin-ply-host { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; }
 .leaflet-image-layer.rtab-env-raster {
     mix-blend-mode: normal;
     opacity: 1;
@@ -25,6 +35,10 @@
     "mqttPass": mqtt_password,
     "graphUrl": "/api/admin/rtab-map/graph?env=1&raster=1&use_opt_map=1",
     "rtabDbLabel": rtab_map_db_path,
+    "plyMapPath": ply_map_path,
+    "plyStatusUrl": "/api/admin/ply-map/status",
+    "plyPreviewUrl": "/api/admin/ply-map/preview",
+    "plyViewerModuleUrl": "/static/js/tracking_ply_viewer.js",
 } %}
 <div class="max-w-7xl mx-auto space-y-6" x-data='adminTracking({{ tracking_cfg|tojson }})' x-init="init()">
     <div>
@@ -65,6 +79,21 @@
 
     <p class="text-sm text-red-600 font-medium" x-show="graphErr" x-text="graphErr"></p>
     <p class="text-xs text-slate-500" x-show="graphMeta && !graphErr" x-text="graphMeta"></p>
+
+    <div class="flex flex-wrap items-center gap-2" x-show="!graphErr">
+        <span class="text-xs font-semibold text-slate-600">Lớp bản đồ:</span>
+        <button type="button" @click="mapTab = 'rtab'; $nextTick(() => onMapTabChange())"
+            :class="mapTab === 'rtab' ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors">RTAB 2D</button>
+        <button type="button" @click="mapTab = 'ply'; $nextTick(() => onMapTabChange())"
+            :class="mapTab === 'ply' ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
+            :disabled="!plyAvailable"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            Đám mây PLY 3D
+        </button>
+        <span class="text-xs text-slate-500" x-show="!plyAvailable">Chưa có file PLY — tải tại Settings.</span>
+        <span class="text-xs text-red-600" x-show="plyErr" x-text="plyErr"></span>
+    </div>
     <div class="rounded-xl border border-amber-400 bg-amber-50 p-4 text-sm text-amber-950 space-y-2 leading-relaxed"
         x-show="graphOptMapMissing && !graphErr">
         <p class="font-bold">Thiếu <code class="text-xs bg-amber-100 px-1 rounded font-mono">Admin.opt_map</code> trong file .db</p>
@@ -90,6 +119,7 @@
         <p class="text-xs text-violet-700/90 font-medium">
             Nút <strong>Lưu</strong> ghi cả cạnh WP–WP và pickup↔waypoint. Tải pickup để vẽ điểm cam và nối portal.
             Điểm tím (waypoint) và cam (pickup) dùng <strong>cùng phép chiếu</strong> với graph RTAB trên map để trùng tọa độ m với PNG/opt_map.
+            <span class="block mt-1 text-amber-800/90">Chế độ <strong>nối cạnh</strong> chỉ trên tab <strong>RTAB 2D</strong>. Tab <strong>Đám mây PLY 3D</strong> chỉ hiển thị điểm tham chiếu cùng tọa độ x,y.</span>
         </p>
         <p class="text-xs font-medium" :class="graphEditMode ? 'text-amber-800' : 'text-slate-500'" x-text="graphHint"></p>
         <div class="flex flex-wrap gap-2">
@@ -122,8 +152,9 @@
         </div>
     </div>
 
-    <div class="relative bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div id="admin-map" class="w-full"></div>
+    <div class="relative bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden map-stack">
+        <div id="admin-map" class="w-full" x-show="mapTab === 'rtab'"></div>
+        <div id="admin-ply-host" class="w-full" x-show="mapTab === 'ply'"></div>
         <div x-show="conn !== 'connected' && mapReady"
             class="absolute bottom-3 left-3 right-3 pointer-events-none flex justify-center">
             <span class="px-3 py-1.5 rounded-lg bg-white/90 border border-slate-200 text-xs text-slate-600 shadow-sm">
@@ -234,6 +265,10 @@
         cfg = cfg || {};
         var topicPose = cfg.topicPose || 'UGV/localization/pose';
         var graphUrl = cfg.graphUrl || '/api/admin/rtab-map/graph?env=1&raster=1&use_opt_map=1';
+        var plyStatusUrl = cfg.plyStatusUrl || '/api/admin/ply-map/status';
+        var plyPreviewUrl = cfg.plyPreviewUrl || '/api/admin/ply-map/preview';
+        var plyModuleUrl = cfg.plyViewerModuleUrl || '/static/js/tracking_ply_viewer.js';
+        var plyPathLabel = cfg.plyMapPath || '';
 
         var map = null;
         var graphBounds = null;
@@ -248,6 +283,10 @@
         var avoidWpLayer = null;
         var topicAvoidanceWp = cfg.topicAvoidanceWp || 'UGV/avoidance/waypoint';
         var graphTrajectoryLines = [];
+        var plyV = null;
+        var plyTrailLast = null;
+        var lastPoseWorld = null;
+        var onWinResize = null;
 
         function updateRobotIcon() {
             if (!robotMarker) return;
@@ -295,6 +334,75 @@
             avoidWpCount: 0,
             avoidLastAt: '',
             avoidJsonPretty: '',
+            mapTab: 'rtab',
+            plyAvailable: false,
+            plyErr: '',
+            plyLoading: false,
+            plyPathLabel: plyPathLabel,
+
+            refreshPlyStatus: async function () {
+                var self = this;
+                try {
+                    var res = await fetch(plyStatusUrl, { credentials: 'same-origin' });
+                    var d = await res.json().catch(function () { return null; });
+                    self.plyAvailable = !!(d && d.exists && d.valid_ply);
+                    if (!self.plyAvailable) self.plyErr = '';
+                } catch (e) {
+                    self.plyAvailable = false;
+                }
+            },
+
+            onMapTabChange: async function () {
+                var self = this;
+                if (self.mapTab === 'rtab' && map) {
+                    setTimeout(function () {
+                        try {
+                            map.invalidateSize();
+                        } catch (e) {}
+                    }, 80);
+                }
+                if (self.mapTab === 'ply') {
+                    await self.ensurePlyViewer();
+                    if (plyV) {
+                        setTimeout(function () {
+                            try {
+                                plyV.resize();
+                            } catch (e) {}
+                        }, 80);
+                    }
+                }
+            },
+
+            ensurePlyViewer: async function () {
+                var self = this;
+                if (plyV) return;
+                var host = document.getElementById('admin-ply-host');
+                if (!host) return;
+                self.plyLoading = true;
+                self.plyErr = '';
+                try {
+                    var res = await fetch(plyPreviewUrl, { credentials: 'same-origin' });
+                    var data = await res.json().catch(function () { return null; });
+                    if (!data || !data.success) {
+                        throw new Error((data && data.message) || 'Không tải preview PLY');
+                    }
+                    var bin = atob(data.positions_b64);
+                    var buf = new Uint8Array(bin.length);
+                    for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+                    var positions = new Float32Array(buf.buffer, buf.byteOffset, buf.length / 4);
+                    var mod = await import(plyModuleUrl + '?v=2');
+                    plyV = mod.createPlyMapViewer(host, { bounds: data.bounds, positions: positions });
+                    plyV.syncWaypoints(self.waypointsRaw, self.pickupsRaw);
+                    if (lastPoseWorld && lastPoseWorld.nx != null) {
+                        var yw = lastPoseWorld.yw;
+                        plyV.setRobotXYYaw(lastPoseWorld.nx, lastPoseWorld.ny, yw != null ? yw : null);
+                    }
+                } catch (e) {
+                    self.plyErr = (e && e.message) ? e.message : String(e);
+                } finally {
+                    self.plyLoading = false;
+                }
+            },
 
             init: function () {
                 var self = this;
@@ -324,6 +432,7 @@
                 /* Leaflet: không gọi L.map() hai lần trên cùng #admin-map (race khi init/async). */
                 if (map !== null && graphBounds) {
                     self.graphErr = '';
+                    await self.refreshPlyStatus();
                     if (map && !avoidWpLayer) {
                         avoidWpLayer = L.layerGroup().addTo(map);
                     }
@@ -335,6 +444,7 @@
                 if (!graph || !graph.success) {
                     self.graphOptMapMissing = false;
                     self.graphErr = (graph && graph.message) || 'API graph không hợp lệ';
+                    await self.refreshPlyStatus();
                     return;
                 }
                 self.graphOptMapMissing = graph.admin_opt_map_available === false;
@@ -354,6 +464,8 @@
                             (graph.env_raster_source === 'admin_opt_map' ? ' (Admin opt_map)' :
                                 (graph.admin_opt_map_available === false ? ' (laser — thiếu Admin.opt_map)' : '')))
                         : (envN ? (', ' + envN + ' điểm env (raw)') : ''));
+
+                await self.refreshPlyStatus();
 
                 map = L.map('admin-map', {
                     crs: L.CRS.Simple,
@@ -536,12 +648,39 @@
                 }).addTo(map).bindPopup('Robot');
 
                 self.mapReady = true;
-                setTimeout(function () { map.invalidateSize(); }, 200);
+                setTimeout(function () {
+                    try {
+                        map.invalidateSize();
+                    } catch (e) {}
+                }, 200);
+
+                if (!self._trackingResizeHook) {
+                    self._trackingResizeHook = true;
+                    onWinResize = function () {
+                        if (plyV) {
+                            try {
+                                plyV.resize();
+                            } catch (e) {}
+                        }
+                        if (map) {
+                            try {
+                                map.invalidateSize();
+                            } catch (e2) {}
+                        }
+                    };
+                    window.addEventListener('resize', onWinResize);
+                }
 
                 await self._loadWaypointGraphOverlay();
 
                 self._clearAvoidanceOnLeave = function () {
                     if (avoidWpLayer) avoidWpLayer.clearLayers();
+                    if (plyV) {
+                        try {
+                            plyV.dispose();
+                        } catch (e) {}
+                        plyV = null;
+                    }
                     self.avoidHasWaypoint = null;
                     self.avoidHasObstacles = null;
                     self.avoidWpCount = 0;
@@ -588,23 +727,29 @@
                                 self.avoidHasObstacles = null;
                             }
                             var xs = aw.wp_x, ys = aw.wp_y;
-                            if (!Array.isArray(xs) || !Array.isArray(ys) || !graphBounds || !avoidWpLayer) {
+                            if (!Array.isArray(xs) || !Array.isArray(ys)) {
                                 self.avoidWpCount = 0;
+                                if (plyV) plyV.syncAvoidance([], []);
                                 return;
                             }
                             var n = Math.min(xs.length, ys.length);
                             self.avoidWpCount = n;
-                            if (n === 0) return;
+                            if (n === 0) {
+                                if (plyV) plyV.syncAvoidance([], []);
+                                return;
+                            }
                             var latlngs = [];
                             for (var ai = 0; ai < n; ai++) {
                                 var ax = Number(xs[ai]), ay = Number(ys[ai]);
                                 if (isNaN(ax) || isNaN(ay)) continue;
-                                var all = poseToMapLL(ax, ay);
-                                if (!all) continue;
-                                latlngs.push({ ll: all, ax: ax, ay: ay });
+                                var all = graphBounds ? poseToMapLL(ax, ay) : null;
+                                if (all) latlngs.push({ ll: all, ax: ax, ay: ay });
+                                else latlngs.push({ ll: null, ax: ax, ay: ay });
                             }
-                            if (latlngs.length > 1) {
-                                L.polyline(latlngs.map(function (q) { return q.ll; }), {
+                            if (avoidWpLayer) avoidWpLayer.clearLayers();
+                            var latlngOnly = latlngs.filter(function (q) { return q.ll; });
+                            if (latlngOnly.length > 1 && avoidWpLayer) {
+                                L.polyline(latlngOnly.map(function (q) { return q.ll; }), {
                                     color: '#d97706',
                                     weight: 3,
                                     opacity: 0.9,
@@ -613,7 +758,7 @@
                                     lineJoin: 'round',
                                 }).addTo(avoidWpLayer);
                             }
-                            latlngs.forEach(function (q) {
+                            latlngOnly.forEach(function (q) {
                                 L.circleMarker(q.ll, {
                                     radius: 5,
                                     color: '#b45309',
@@ -624,6 +769,15 @@
                                     '<div class="text-xs font-mono">né vật cản<br>x=' + q.ax.toFixed(4) + ' y=' + q.ay.toFixed(4) + ' m</div>'
                                 );
                             });
+                            if (self.mapTab === 'ply' && plyV) {
+                                var axs = [];
+                                var ays = [];
+                                latlngs.forEach(function (q) {
+                                    axs.push(q.ax);
+                                    ays.push(q.ay);
+                                });
+                                plyV.syncAvoidance(axs, ays);
+                            }
                             return;
                         }
                         if (t !== topicPose) return;
@@ -642,9 +796,29 @@
                         currentHeadingDeg = deg;
                         updateRobotIcon();
 
+                        lastPoseWorld = { nx: nx, ny: ny, yw: yw };
+
                         var ll = poseToMapLL(nx, ny);
-                        if (!ll) return;
-                        robotMarker.setLatLng(ll);
+                        if (ll && robotMarker) {
+                            robotMarker.setLatLng(ll);
+                        }
+
+                        if (self.mapTab === 'ply' && plyV) {
+                            plyV.setRobotXYYaw(nx, ny, yw);
+                            var domP = false;
+                            if (plyTrailLast) {
+                                var dp = haversineMeters(plyTrailLast, [nx, ny]);
+                                if (dp < MIN_TRAIL_DIST) domP = true;
+                            }
+                            if (!domP) {
+                                plyV.pushTrail(nx, ny);
+                                plyTrailLast = [nx, ny];
+                            }
+                        } else {
+                            plyTrailLast = null;
+                        }
+
+                        if (!ll || !trailLine) return;
 
                         var dominated = false;
                         if (trailCoords.length > 0) {
@@ -667,7 +841,13 @@
 
             clearTrail: function () {
                 trailCoords = [];
+                plyTrailLast = null;
                 if (trailLine) trailLine.setLatLngs([]);
+                if (plyV) {
+                    try {
+                        plyV.clearTrail();
+                    } catch (e) {}
+                }
                 this.trailCount = 0;
             },
 
@@ -952,6 +1132,11 @@
                         );
                     }
                 });
+                if (plyV) {
+                    try {
+                        plyV.syncWaypoints(self.waypointsRaw, self.pickupsRaw);
+                    } catch (e) {}
+                }
             },
         };
     }

@@ -236,6 +236,15 @@ RTAB_MAP_OPT_MAP_VIEWER_PALETTE = os.getenv("RTAB_MAP_OPT_MAP_VIEWER_PALETTE", "
     "legacy",
 )
 
+# === Point cloud PLY (Admin Tracking — viewer 3D, tùy chọn) ===
+PLY_MAP_PATH = os.getenv("PLY_MAP_PATH", str(BASE_DIR / "cloud.ply"))
+_ply_max_raw = os.getenv("PLY_MAP_MAX_BYTES", "").strip()
+if not _ply_max_raw or _ply_max_raw.lower() in ("0", "none", "unlimited", "-1"):
+    PLY_MAP_MAX_BYTES = 0
+else:
+    PLY_MAP_MAX_BYTES = int(_ply_max_raw)
+PLY_MAP_MAX_PREVIEW_VERTICES = int(os.getenv("PLY_MAP_MAX_PREVIEW_VERTICES", "350000"))
+
 # === MQTT topic gửi waypoints cho robot di chuyển ===
 MQTT_TOPIC_PATH = os.getenv("MQTT_TOPIC_PATH", "UGV/path_topic")
 # Gốc GPS (lat/lon/alt) — đồng bộ với firmware / scheduler khi admin đổi điểm base

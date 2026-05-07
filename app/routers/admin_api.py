@@ -48,6 +48,11 @@ from app.services.robot_waypoints_dataset_store import (
     set_waypoints_dataset,
 )
 from app.services.admin_route_planner import plan_field_route
+from app.services.ply_map_service import (
+    build_ply_preview_payload,
+    get_ply_map_status,
+    save_ply_map_from_upload,
+)
 from app.services.rtab_map_graph_service import (
     build_rtab_graph_json,
     get_rtab_map_status,
@@ -134,6 +139,42 @@ async def admin_rtab_map_upload(request: Request, file: UploadFile = File(...)):
                 "success": True,
                 "message": msg,
                 "status": get_rtab_map_status(),
+            }
+        )
+    finally:
+        await file.close()
+
+
+@router.get("/ply-map/status")
+async def admin_ply_map_status(request: Request):
+    """Trạng thái file point cloud PLY trên disk."""
+    require_admin(request)
+    return JSONResponse(content=get_ply_map_status())
+
+
+@router.get("/ply-map/preview")
+async def admin_ply_map_preview(request: Request):
+    """Điểm PLY đã downsample + bounds (base64 float32 xyz) cho Three.js."""
+    require_admin(request)
+    return JSONResponse(content=build_ply_preview_payload())
+
+
+@router.post("/ply-map/upload")
+async def admin_ply_map_upload(request: Request, file: UploadFile = File(...)):
+    """Tải lên file .ply, ghi đè ``PLY_MAP_PATH``."""
+    require_admin(request)
+    name = (file.filename or "").strip().lower()
+    if not name.endswith(".ply"):
+        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file .ply")
+    try:
+        ok, msg = await save_ply_map_from_upload(file)
+        if not ok:
+            raise HTTPException(status_code=400, detail=msg)
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": msg,
+                "status": get_ply_map_status(),
             }
         )
     finally:
