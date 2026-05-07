@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.config import (
+    RTAB_MAP_BOUNDS_ENV_PCT_HIGH,
+    RTAB_MAP_BOUNDS_ENV_PCT_LOW,
     RTAB_MAP_DB_MAX_BYTES,
     RTAB_MAP_DB_PATH,
     RTAB_MAP_ENV_MAX_POINTS,
@@ -34,6 +36,7 @@ from app.config import (
     RTAB_MAP_OPT_MAP_MAX_SIDE,
     RTAB_MAP_OPT_MAP_INVERT_GREY,
     RTAB_MAP_OPT_MAP_VIEWER_PALETTE,
+    RTAB_MAP_TRAJECTORY_GAP_SPLIT_M,
 )
 
 
@@ -558,6 +561,51 @@ def _node_trajectory_world_xy(
     return out
 
 
+def _linear_percentile(sorted_vals: List[float], p: float) -> float:
+    """Linear interpolation percentile; ``sorted_vals`` phải đã sort."""
+    if not sorted_vals:
+        return 0.0
+    p = max(0.0, min(100.0, float(p)))
+    if len(sorted_vals) == 1:
+        return float(sorted_vals[0])
+    k = (len(sorted_vals) - 1) * (p / 100.0)
+    i = int(k)
+    f = k - i
+    a = float(sorted_vals[i])
+    b = float(sorted_vals[i + 1]) if i + 1 < len(sorted_vals) else a
+    return a + f * (b - a)
+
+
+def _split_trajectory_on_gap(
+    points: List[List[float]], gap_m: float
+) -> List[List[List[float]]]:
+    """Tách quỹ đạo khi khoảng cách hai điểm liên tiếp > gap_m (session / relocalization)."""
+    if not points or gap_m <= 0:
+        return [points] if points else []
+    segs: List[List[List[float]]] = []
+    cur: List[List[float]] = []
+    g2 = gap_m * gap_m
+    prev: Optional[Tuple[float, float]] = None
+    for q in points:
+        if len(q) < 2:
+            continue
+        try:
+            x, y = float(q[0]), float(q[1])
+        except (TypeError, ValueError):
+            continue
+        if prev is not None:
+            dx, dy = x - prev[0], y - prev[1]
+            if dx * dx + dy * dy > g2:
+                if len(cur) > 1:
+                    segs.append(cur)
+                cur = []
+        cur.append([x, y])
+        prev = (x, y)
+    if len(cur) > 1:
+        segs.append(cur)
+    return segs
+
+
 def build_rtab_graph_json(
     db_path: Optional[str] = None,
     include_environment: bool = True,
@@ -666,6 +714,8 @@ def build_rtab_graph_json(
         ]
 
         trajectory_xy = _node_trajectory_world_xy(con, positions, max_points=12000)
+        gap_m = float(RTAB_MAP_TRAJECTORY_GAP_SPLIT_M)
+        trajectory_segments = _split_trajectory_on_gap(trajectory_xy, gap_m)
 
         env_points: List[List[float]] = []
         env_nodes_used = 0
@@ -680,16 +730,39 @@ def build_rtab_graph_json(
             except (sqlite3.Error, struct.error, zlib.error, MemoryError):
                 env_points = []
 
-        xs = [p[0] for p in positions.values()]
-        ys = [p[1] for p in positions.values()]
+        node_xs = [p[0] for p in positions.values()]
+        node_ys = [p[1] for p in positions.values()]
+        nx_min, nx_max = min(node_xs), max(node_xs)
+        ny_min, ny_max = min(node_ys), max(node_ys)
+        cand_x = [nx_min, nx_max]
+        cand_y = [ny_min, ny_max]
         if opt_map_bounds:
-            xs.extend([opt_map_bounds["xmin"], opt_map_bounds["xmax"]])
-            ys.extend([opt_map_bounds["ymin"], opt_map_bounds["ymax"]])
-        for q in env_points:
-            xs.append(q[0])
-            ys.append(q[1])
-        xmin, xmax = min(xs), max(xs)
-        ymin, ymax = min(ys), max(ys)
+            cand_x.extend([opt_map_bounds["xmin"], opt_map_bounds["xmax"]])
+            cand_y.extend([opt_map_bounds["ymin"], opt_map_bounds["ymax"]])
+        if env_points:
+            lo_p = float(RTAB_MAP_BOUNDS_ENV_PCT_LOW)
+            hi_p = float(RTAB_MAP_BOUNDS_ENV_PCT_HIGH)
+            if lo_p <= 0.0 and hi_p >= 100.0:
+                for q in env_points:
+                    cand_x.append(float(q[0]))
+                    cand_y.append(float(q[1]))
+            else:
+                exs = sorted(float(q[0]) for q in env_points)
+                eys = sorted(float(q[1]) for q in env_points)
+                cand_x.extend(
+                    [
+                        _linear_percentile(exs, lo_p),
+                        _linear_percentile(exs, hi_p),
+                    ]
+                )
+                cand_y.extend(
+                    [
+                        _linear_percentile(eys, lo_p),
+                        _linear_percentile(eys, hi_p),
+                    ]
+                )
+        xmin, xmax = min(cand_x), max(cand_x)
+        ymin, ymax = min(cand_y), max(cand_y)
         pad = max((xmax - xmin), (ymax - ymin)) * 0.05 + 0.5
         bounds = {
             "xmin": xmin - pad,
@@ -744,6 +817,7 @@ def build_rtab_graph_json(
             "nodes": nodes_out,
             "links": links,
             "trajectory": trajectory_xy,
+            "trajectory_segments": trajectory_segments,
             "source": path.name,
             "env_points": env_points,
             "env_nodes_sampled": env_nodes_used,

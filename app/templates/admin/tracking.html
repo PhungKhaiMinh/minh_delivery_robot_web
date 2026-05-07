@@ -247,7 +247,7 @@
         var wpEdgeLayer = null;
         var avoidWpLayer = null;
         var topicAvoidanceWp = cfg.topicAvoidanceWp || 'UGV/avoidance/waypoint';
-        var graphTrajectoryLine = null;
+        var graphTrajectoryLines = [];
 
         function updateRobotIcon() {
             if (!robotMarker) return;
@@ -388,7 +388,30 @@
                     ).addTo(map);
                 }
 
-                if (graph.trajectory && graph.trajectory.length > 1) {
+                if (graph.trajectory_segments && graph.trajectory_segments.length) {
+                    graph.trajectory_segments.forEach(function (seg) {
+                        if (!seg || seg.length < 2) return;
+                        var tlatlngs = [];
+                        for (var ti = 0; ti < seg.length; ti++) {
+                            var tv = seg[ti];
+                            if (!tv || tv.length < 2) continue;
+                            var tll = poseToMapLL(Number(tv[0]), Number(tv[1]));
+                            if (tll) tlatlngs.push(tll);
+                        }
+                        if (tlatlngs.length > 1) {
+                            graphTrajectoryLines.push(
+                                L.polyline(tlatlngs, {
+                                    color: '#facc15',
+                                    weight: 3.5,
+                                    opacity: 0.95,
+                                    lineJoin: 'round',
+                                    lineCap: 'round',
+                                    interactive: false,
+                                }).addTo(map)
+                            );
+                        }
+                    });
+                } else if (graph.trajectory && graph.trajectory.length > 1) {
                     var tlatlngs = [];
                     for (var ti = 0; ti < graph.trajectory.length; ti++) {
                         var tv = graph.trajectory[ti];
@@ -397,14 +420,16 @@
                         if (tll) tlatlngs.push(tll);
                     }
                     if (tlatlngs.length > 1) {
-                        graphTrajectoryLine = L.polyline(tlatlngs, {
-                            color: '#facc15',
-                            weight: 3.5,
-                            opacity: 0.95,
-                            lineJoin: 'round',
-                            lineCap: 'round',
-                            interactive: false,
-                        }).addTo(map);
+                        graphTrajectoryLines.push(
+                            L.polyline(tlatlngs, {
+                                color: '#facc15',
+                                weight: 3.5,
+                                opacity: 0.95,
+                                lineJoin: 'round',
+                                lineCap: 'round',
+                                interactive: false,
+                            }).addTo(map)
+                        );
                     }
                 }
 

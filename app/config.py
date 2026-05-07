@@ -202,6 +202,27 @@ RTAB_MAP_ENV_MAX_POINTS = int(os.getenv("RTAB_MAP_ENV_MAX_POINTS", "280000"))
 RTAB_MAP_ENV_MAX_POINTS_NO_OPT_MAP = int(os.getenv("RTAB_MAP_ENV_MAX_POINTS_NO_OPT_MAP", "900000"))
 # Cạnh dài nhất (px) của PNG môi trường — tăng để gần độ mịn Graph View của RTAB-Map
 RTAB_MAP_ENV_RASTER_MAX_SIDE = int(os.getenv("RTAB_MAP_ENV_RASTER_MAX_SIDE", "4096"))
+# Percentile (env X/Y riêng) khi gộp bbox với node — cắt đuôi laser outlier làm méo tỉ lệ. "0,100" = min/max đầy đủ như trước.
+_rtab_pct_raw = os.getenv("RTAB_MAP_BOUNDS_ENV_PERCENTILE", "1,99").strip().lower()
+if _rtab_pct_raw in ("", "full", "all", "none"):
+    RTAB_MAP_BOUNDS_ENV_PCT_LOW, RTAB_MAP_BOUNDS_ENV_PCT_HIGH = 0.0, 100.0
+else:
+    _parts = [p.strip() for p in _rtab_pct_raw.split(",") if p.strip()]
+    try:
+        if len(_parts) == 2:
+            RTAB_MAP_BOUNDS_ENV_PCT_LOW = float(_parts[0])
+            RTAB_MAP_BOUNDS_ENV_PCT_HIGH = float(_parts[1])
+        else:
+            RTAB_MAP_BOUNDS_ENV_PCT_LOW, RTAB_MAP_BOUNDS_ENV_PCT_HIGH = 0.0, 100.0
+    except ValueError:
+        RTAB_MAP_BOUNDS_ENV_PCT_LOW, RTAB_MAP_BOUNDS_ENV_PCT_HIGH = 0.0, 100.0
+if RTAB_MAP_BOUNDS_ENV_PCT_LOW > RTAB_MAP_BOUNDS_ENV_PCT_HIGH:
+    RTAB_MAP_BOUNDS_ENV_PCT_LOW, RTAB_MAP_BOUNDS_ENV_PCT_HIGH = (
+        RTAB_MAP_BOUNDS_ENV_PCT_HIGH,
+        RTAB_MAP_BOUNDS_ENV_PCT_LOW,
+    )
+# Khoảng cách (m) giữa hai điểm quỹ đạo liên tiếp — vượt ngưỡng thì tách polyline (tránh nối session / relocalization xa).
+RTAB_MAP_TRAJECTORY_GAP_SPLIT_M = float(os.getenv("RTAB_MAP_TRAJECTORY_GAP_SPLIT_M", "15"))
 # Admin.opt_map: upscale nearest-neighbor (cùng mét / pixel gốc) để zoom web sắc như Graph View
 RTAB_MAP_OPT_MAP_MAX_SIDE = int(os.getenv("RTAB_MAP_OPT_MAP_MAX_SIDE", "8192"))
 RTAB_MAP_OPT_MAP_MAX_PIXELS = int(os.getenv("RTAB_MAP_OPT_MAP_MAX_PIXELS", str(16_000_000)))
