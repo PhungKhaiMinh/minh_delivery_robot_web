@@ -187,63 +187,19 @@ CAMPUS_ORIGIN_LAT = float(os.getenv("CAMPUS_ORIGIN_LAT", "10.77202433"))
 CAMPUS_ORIGIN_LON = float(os.getenv("CAMPUS_ORIGIN_LON", "106.65860867"))
 CAMPUS_ORIGIN_ALT = float(os.getenv("CAMPUS_ORIGIN_ALT", "0.0"))
 
-# === RTAB-Map database (graph pose) — Admin Tracking ===
-# Railway: gắn Volume (vd. mount /data) và đặt RTAB_MAP_DB_PATH=/data/A5_night.db — file không nằm trong Git.
-RTAB_MAP_DB_PATH = os.getenv("RTAB_MAP_DB_PATH", str(BASE_DIR / "A5_night.db"))
-# 0 / rỗng / unlimited = không giới hạn kích thước upload ở tầng ứng dụng (vẫn chịu giới hạn reverse proxy / đĩa).
-_rtab_max_raw = os.getenv("RTAB_MAP_DB_MAX_BYTES", "").strip()
-if not _rtab_max_raw or _rtab_max_raw.lower() in ("0", "none", "unlimited", "-1"):
-    RTAB_MAP_DB_MAX_BYTES = 0
+# === Occupancy grid PGM (Admin Tracking — Leaflet 2D) ===
+# Railway: Volume + OCC_GRID_MAP_PATH=/data/map.pgm ; kèm map.yaml cùng thư mục (resolution + origin ROS) nếu có.
+OCC_GRID_MAP_PATH = os.getenv("OCC_GRID_MAP_PATH", str(BASE_DIR / "map_cs1.pgm"))
+OCC_GRID_MAP_YAML_PATH = os.getenv("OCC_GRID_MAP_YAML_PATH", "").strip()
+OCC_GRID_MAP_RESOLUTION = float(os.getenv("OCC_GRID_MAP_RESOLUTION", "0.05"))
+# Khi không có map.yaml: góc trên-trái ảnh PGM (pixel 0,0) tại (OCC_GRID_MAP_ORIGIN_X, OCC_GRID_MAP_ORIGIN_Y) = đỉnh bắc-trái theo trục hiển thị.
+OCC_GRID_MAP_ORIGIN_X = float(os.getenv("OCC_GRID_MAP_ORIGIN_X", "0.0"))
+OCC_GRID_MAP_ORIGIN_Y = float(os.getenv("OCC_GRID_MAP_ORIGIN_Y", "0.0"))
+_occ_max_raw = os.getenv("OCC_GRID_MAP_MAX_BYTES", "").strip()
+if not _occ_max_raw or _occ_max_raw.lower() in ("0", "none", "unlimited", "-1"):
+    OCC_GRID_MAP_MAX_BYTES = 0
 else:
-    RTAB_MAP_DB_MAX_BYTES = int(_rtab_max_raw)
-# Điểm môi trường (laser / obstacle) dùng khi build raster / hoặc gửi raw khi raster=0
-RTAB_MAP_ENV_MAX_POINTS = int(os.getenv("RTAB_MAP_ENV_MAX_POINTS", "280000"))
-# Khi DB **không có** Admin.opt_map (chưa lưu grid sau Graph Optimizer): lấy nhiều điểm laser hơn để raster xấp xỉ gần viewer hơn (tốn RAM/CPU hơn).
-RTAB_MAP_ENV_MAX_POINTS_NO_OPT_MAP = int(os.getenv("RTAB_MAP_ENV_MAX_POINTS_NO_OPT_MAP", "900000"))
-# Cạnh dài nhất (px) của PNG môi trường — tăng để gần độ mịn Graph View của RTAB-Map
-RTAB_MAP_ENV_RASTER_MAX_SIDE = int(os.getenv("RTAB_MAP_ENV_RASTER_MAX_SIDE", "4096"))
-# Percentile (env X/Y riêng) khi gộp bbox với node — cắt đuôi laser outlier làm méo tỉ lệ. "0,100" = min/max đầy đủ như trước.
-_rtab_pct_raw = os.getenv("RTAB_MAP_BOUNDS_ENV_PERCENTILE", "1,99").strip().lower()
-if _rtab_pct_raw in ("", "full", "all", "none"):
-    RTAB_MAP_BOUNDS_ENV_PCT_LOW, RTAB_MAP_BOUNDS_ENV_PCT_HIGH = 0.0, 100.0
-else:
-    _parts = [p.strip() for p in _rtab_pct_raw.split(",") if p.strip()]
-    try:
-        if len(_parts) == 2:
-            RTAB_MAP_BOUNDS_ENV_PCT_LOW = float(_parts[0])
-            RTAB_MAP_BOUNDS_ENV_PCT_HIGH = float(_parts[1])
-        else:
-            RTAB_MAP_BOUNDS_ENV_PCT_LOW, RTAB_MAP_BOUNDS_ENV_PCT_HIGH = 0.0, 100.0
-    except ValueError:
-        RTAB_MAP_BOUNDS_ENV_PCT_LOW, RTAB_MAP_BOUNDS_ENV_PCT_HIGH = 0.0, 100.0
-if RTAB_MAP_BOUNDS_ENV_PCT_LOW > RTAB_MAP_BOUNDS_ENV_PCT_HIGH:
-    RTAB_MAP_BOUNDS_ENV_PCT_LOW, RTAB_MAP_BOUNDS_ENV_PCT_HIGH = (
-        RTAB_MAP_BOUNDS_ENV_PCT_HIGH,
-        RTAB_MAP_BOUNDS_ENV_PCT_LOW,
-    )
-# Khoảng cách (m) giữa hai điểm quỹ đạo liên tiếp — vượt ngưỡng thì tách polyline (tránh nối session / relocalization xa).
-RTAB_MAP_TRAJECTORY_GAP_SPLIT_M = float(os.getenv("RTAB_MAP_TRAJECTORY_GAP_SPLIT_M", "15"))
-# Admin.opt_map: upscale nearest-neighbor (cùng mét / pixel gốc) để zoom web sắc như Graph View
-RTAB_MAP_OPT_MAP_MAX_SIDE = int(os.getenv("RTAB_MAP_OPT_MAP_MAX_SIDE", "8192"))
-RTAB_MAP_OPT_MAP_MAX_PIXELS = int(os.getenv("RTAB_MAP_OPT_MAP_MAX_PIXELS", str(16_000_000)))
-# 1 = đảo sáng/tối PNG opt_map (tường đen trên nền trắng); 0 = giữ palette cũ — chỉ dùng khi RTAB_MAP_OPT_MAP_VIEWER_PALETTE=0
-RTAB_MAP_OPT_MAP_INVERT_GREY = os.getenv("RTAB_MAP_OPT_MAP_INVERT_GREY", "1").strip().lower() not in ("0", "false", "no")
-# 1 = tô màu occupancy giống rtabmap-viewer (unknown xám đậm, free sáng, tường đen); 0 = palette cũ + invert
-RTAB_MAP_OPT_MAP_VIEWER_PALETTE = os.getenv("RTAB_MAP_OPT_MAP_VIEWER_PALETTE", "1").strip().lower() not in (
-    "0",
-    "false",
-    "no",
-    "legacy",
-)
-
-# === Point cloud PLY (Admin Tracking — viewer 3D, tùy chọn) ===
-PLY_MAP_PATH = os.getenv("PLY_MAP_PATH", str(BASE_DIR / "cloud.ply"))
-_ply_max_raw = os.getenv("PLY_MAP_MAX_BYTES", "").strip()
-if not _ply_max_raw or _ply_max_raw.lower() in ("0", "none", "unlimited", "-1"):
-    PLY_MAP_MAX_BYTES = 0
-else:
-    PLY_MAP_MAX_BYTES = int(_ply_max_raw)
-PLY_MAP_MAX_PREVIEW_VERTICES = int(os.getenv("PLY_MAP_MAX_PREVIEW_VERTICES", "350000"))
+    OCC_GRID_MAP_MAX_BYTES = int(_occ_max_raw)
 
 # === MQTT topic gửi waypoints cho robot di chuyển ===
 MQTT_TOPIC_PATH = os.getenv("MQTT_TOPIC_PATH", "UGV/path_topic")

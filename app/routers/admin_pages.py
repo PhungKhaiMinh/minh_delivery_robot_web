@@ -29,8 +29,7 @@ from app.config import (
     CAMPUS_ORIGIN_LAT,
     CAMPUS_ORIGIN_LON,
     CAMPUS_ORIGIN_ALT,
-    PLY_MAP_PATH,
-    RTAB_MAP_DB_PATH,
+    OCC_GRID_MAP_PATH,
 )
 from app.services.admin_settings_store import get_can_last_params, get_los_last_params
 from app.services.auth_service import get_current_user
@@ -137,8 +136,7 @@ async def admin_tracking(request: Request):
         "campus_origin_lon": CAMPUS_ORIGIN_LON,
         "mqtt_topic_pose": MQTT_UGV_TOPIC_POSE,
         "mqtt_topic_avoidance_waypoint": MQTT_UGV_TOPIC_AVOIDANCE_WAYPOINT,
-        "rtab_map_db_path": RTAB_MAP_DB_PATH,
-        "ply_map_path": PLY_MAP_PATH,
+        "occ_grid_map_path": OCC_GRID_MAP_PATH,
         **_mqtt_ctx(),
     }
     return templates.TemplateResponse(request, "admin/tracking.html", ctx)
@@ -170,8 +168,7 @@ async def admin_settings(request: Request):
         "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
         "los_saved": get_los_last_params(),
         "can_saved": get_can_last_params(),
-        "rtab_map_db_path": RTAB_MAP_DB_PATH,
-        "ply_map_path": PLY_MAP_PATH,
+        "occ_grid_map_path": OCC_GRID_MAP_PATH,
         **_mqtt_ctx(),
     }
     return templates.TemplateResponse(request, "admin/settings.html", ctx)

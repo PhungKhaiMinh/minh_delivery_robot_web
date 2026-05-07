@@ -2,8 +2,10 @@
 API JSON cho Admin Dashboard (yêu cầu role admin).
 """
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from typing import Optional
+
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
 
 from app.config import (
     MQTT_WS_URL,
@@ -48,15 +50,11 @@ from app.services.robot_waypoints_dataset_store import (
     set_waypoints_dataset,
 )
 from app.services.admin_route_planner import plan_field_route
-from app.services.ply_map_service import (
-    build_ply_preview_payload,
-    get_ply_map_status,
-    save_ply_map_from_upload,
-)
-from app.services.rtab_map_graph_service import (
-    build_rtab_graph_json,
-    get_rtab_map_status,
-    save_rtab_map_from_upload,
+from app.services.pgm_map_service import (
+    build_occ_grid_meta,
+    get_occ_grid_status,
+    pgm_to_png_bytes,
+    save_pgm_map_from_upload,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["Admin API"])
@@ -92,93 +90,55 @@ async def admin_mqtt_config(request: Request):
     )
 
 
-@router.get("/rtab-map/graph")
-async def admin_rtab_map_graph(
+@router.get("/occ-grid/meta")
+async def admin_occ_grid_meta(request: Request):
+    """Bounds (mét) + meta cho Leaflet Tracking (PGM → PNG)."""
+    require_admin(request)
+    return JSONResponse(content=build_occ_grid_meta())
+
+
+@router.get("/occ-grid/status")
+async def admin_occ_grid_status(request: Request):
+    """Trạng thái file PGM trên disk."""
+    require_admin(request)
+    return JSONResponse(content=get_occ_grid_status())
+
+
+@router.get("/occ-grid/image.png")
+async def admin_occ_grid_image_png(request: Request):
+    """Ảnh PNG render từ PGM (cùng cookie admin)."""
+    require_admin(request)
+    try:
+        png, _, _ = pgm_to_png_bytes()
+    except (OSError, ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return Response(content=png, media_type="image/png")
+
+
+@router.post("/occ-grid/upload")
+async def admin_occ_grid_upload(
     request: Request,
-    env: int = Query(1, description="1 = gồm điểm scan/obstacle (môi trường), 0 = chỉ graph"),
-    raster: int = Query(
-        1,
-        description="1 = PNG raster (payload nhỏ, tường rõ), 0 = trả env_points JSON (debug, nặng)",
-    ),
-    use_opt_map: int = Query(
-        1,
-        description="1 = nếu DB có Admin.opt_map + opt_poses: graph + PNG cùng khung tối ưu (Graph View). 0 = luôn dùng toàn bộ Node.pose + ghép laser (debug / DB chưa tối ưu).",
-    ),
+    pgm: UploadFile = File(...),
+    yaml: Optional[UploadFile] = File(default=None),
 ):
-    """Graph RTAB-Map cho Admin Tracking; môi trường mặc định là PNG raster."""
+    """Tải PGM (bắt buộc) và map.yaml ROS (tùy chọn) lên ``OCC_GRID_MAP_PATH``."""
     require_admin(request)
+    name = (pgm.filename or "").strip().lower()
+    if not name.endswith((".pgm", ".pnm")):
+        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file .pgm")
+    yn = (yaml.filename or "").strip().lower() if yaml else ""
+    if yaml and yn and not yn.endswith((".yaml", ".yml")):
+        raise HTTPException(status_code=400, detail="File kèm phải là .yaml hoặc .yml")
+    ok, msg = await save_pgm_map_from_upload(pgm, yaml_upload=yaml)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
     return JSONResponse(
-        content=build_rtab_graph_json(
-            include_environment=(env != 0),
-            include_raster=(raster != 0),
-            prefer_admin_opt_map=(use_opt_map != 0),
-        )
+        content={
+            "success": True,
+            "message": msg,
+            "status": get_occ_grid_status(),
+        }
     )
-
-
-@router.get("/rtab-map/status")
-async def admin_rtab_map_status(request: Request):
-    """Trạng thái file map trên disk (path, kích thước, hợp lệ RTAB)."""
-    require_admin(request)
-    return JSONResponse(content=get_rtab_map_status())
-
-
-@router.post("/rtab-map/upload")
-async def admin_rtab_map_upload(request: Request, file: UploadFile = File(...)):
-    """Tải lên file .db RTAB-Map, ghi đè ``RTAB_MAP_DB_PATH`` (một lần, dùng lại mỗi lần mở Tracking)."""
-    require_admin(request)
-    name = (file.filename or "").strip().lower()
-    if not name.endswith(".db"):
-        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file .db")
-    try:
-        ok, msg = await save_rtab_map_from_upload(file)
-        if not ok:
-            raise HTTPException(status_code=400, detail=msg)
-        return JSONResponse(
-            content={
-                "success": True,
-                "message": msg,
-                "status": get_rtab_map_status(),
-            }
-        )
-    finally:
-        await file.close()
-
-
-@router.get("/ply-map/status")
-async def admin_ply_map_status(request: Request):
-    """Trạng thái file point cloud PLY trên disk."""
-    require_admin(request)
-    return JSONResponse(content=get_ply_map_status())
-
-
-@router.get("/ply-map/preview")
-async def admin_ply_map_preview(request: Request):
-    """Điểm PLY đã downsample + bounds (base64 float32 xyz) cho Three.js."""
-    require_admin(request)
-    return JSONResponse(content=build_ply_preview_payload())
-
-
-@router.post("/ply-map/upload")
-async def admin_ply_map_upload(request: Request, file: UploadFile = File(...)):
-    """Tải lên file .ply, ghi đè ``PLY_MAP_PATH``."""
-    require_admin(request)
-    name = (file.filename or "").strip().lower()
-    if not name.endswith(".ply"):
-        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file .ply")
-    try:
-        ok, msg = await save_ply_map_from_upload(file)
-        if not ok:
-            raise HTTPException(status_code=400, detail=msg)
-        return JSONResponse(
-            content={
-                "success": True,
-                "message": msg,
-                "status": get_ply_map_status(),
-            }
-        )
-    finally:
-        await file.close()
 
 
 @router.get("/bookings/active")

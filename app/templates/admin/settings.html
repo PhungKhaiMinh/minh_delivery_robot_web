@@ -12,8 +12,7 @@
     "topicParaCan": "UGV/para/can",
     "losSaved": los_saved,
     "canSaved": can_saved,
-    "rtabMapDbPath": rtab_map_db_path,
-    "plyMapPath": ply_map_path,
+    "occGridMapPath": occ_grid_map_path,
 } %}
 <div class="max-w-4xl mx-auto space-y-8" x-data='adminSettings({{ settings_cfg|tojson }})'>
     <div>
@@ -38,78 +37,46 @@
     </div>
     <p class="text-xs text-red-600 min-h-[1rem]" x-show="publishError" x-text="publishError"></p>
 
-    <!-- Bản đồ RTAB (Tracking) — tải một lần, server đọc lại mỗi lần mở trang Tracking -->
+    <!-- Bản đồ PGM (Admin Tracking) -->
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-4">
         <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span>
-            Bản đồ RTAB-Map (Admin Tracking)
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+            Bản đồ occupancy PGM (Admin Tracking)
         </p>
         <p class="text-xs text-slate-500">
-            Trang <strong>Tracking</strong> tự tải graph từ file trên server — <strong>không cần chọn map mỗi lần</strong>.
-            Mọi máy / mọi trình duyệt đăng nhập admin vào <strong>cùng một website</strong> đều thấy cùng một map (file nằm trên server, không lưu trong máy từng PC).
-            Trên Railway: thêm <strong>Volume</strong> (vd. mount <code class="bg-slate-100 px-1 rounded">/data</code>) và biến môi trường
-            <code class="bg-slate-100 px-1 rounded">RTAB_MAP_DB_PATH=/data/A5_night.db</code>, rồi tải file <code class="bg-slate-100 px-1 rounded">.db</code> một lần tại đây.
-            Ứng dụng không giới hạn dung lượng file .db khi tải lên (trừ khi bạn đặt biến môi trường <code class="bg-slate-100 px-1 rounded">RTAB_MAP_DB_MAX_BYTES</code>).
-            Reverse proxy (nginx, …) có thể vẫn giới hạn body — cần tăng <code class="bg-slate-100 px-1 rounded">client_max_body_size</code> nếu upload lớn.
-            Không commit file map lớn lên GitHub.
+            Tải file <code class="bg-slate-100 px-1 rounded">.pgm</code> (ví dụ <code class="font-mono">map_cs1.pgm</code>).
+            Trang <strong>Tracking</strong> hiển thị ảnh map 2D (Leaflet), pose MQTT, waypoint graph và điểm né vật cản.
+            Nếu có <code class="font-mono">map.yaml</code> kiểu ROS (trường <code class="text-xs">resolution</code>, <code class="text-xs">origin</code>), chọn cùng lúc để khớp tỉ lệ mét — không thì dùng biến môi trường
+            <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_RESOLUTION</code>, <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_ORIGIN_X</code>, <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_ORIGIN_Y</code>.
+            Railway: <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_PATH=/data/map.pgm</code> trên volume.
         </p>
         <dl class="text-xs space-y-1 font-mono text-slate-700 bg-slate-50 rounded-xl p-3 border border-slate-100">
-            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Đường dẫn server</dt><dd class="break-all" x-text="rtabPath || rtabMapDbPath"></dd></div>
-            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Có file</dt><dd><span x-text="rtabExists ? 'Có' : 'Chưa'"></span> · <span x-text="rtabBytesLabel"></span> · RTAB hợp lệ: <span x-text="rtabValid ? 'Có' : '—'"></span></dd></div>
+            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Đường dẫn server</dt><dd class="break-all" x-text="occPath || occGridMapPath"></dd></div>
+            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Có file</dt><dd><span x-text="occExists ? 'Có' : 'Chưa'"></span> · <span x-text="occBytesLabel"></span> · <span x-text="occWHLabel"></span> · res: <span x-text="occResLabel"></span> · YAML: <span x-text="occYamlLabel"></span></dd></div>
         </dl>
         <div class="flex flex-wrap items-end gap-3">
             <label class="block min-w-[12rem] flex-1">
-                <span class="text-xs font-medium text-slate-600">Chọn file RTAB-Map (.db)</span>
-                <input type="file" accept=".db,.sqlite,application/octet-stream" x-ref="rtabFile"
-                    class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-violet-100 file:text-violet-800 hover:file:bg-violet-200" />
+                <span class="text-xs font-medium text-slate-600">Chọn PGM (.pgm)</span>
+                <input type="file" accept=".pgm,.pnm,image/x-portable-graymap,application/octet-stream" x-ref="occPgmFile"
+                    class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-100 file:text-emerald-800 hover:file:bg-emerald-200" />
             </label>
-            <button type="button" @click="uploadRtabMap()"
-                :disabled="rtabUploading"
-                class="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 shrink-0">
-                <span x-show="!rtabUploading">Tải lên &amp; lưu</span>
-                <span x-show="rtabUploading">Đang tải…</span>
+            <label class="block min-w-[10rem] flex-1">
+                <span class="text-xs font-medium text-slate-600">map.yaml (tùy chọn)</span>
+                <input type="file" accept=".yaml,.yml,text/yaml,application/x-yaml,.yaml,.yml" x-ref="occYamlFile"
+                    class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200" />
+            </label>
+            <button type="button" @click="uploadOccGridMap()"
+                :disabled="occUploading"
+                class="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 shrink-0">
+                <span x-show="!occUploading">Tải lên &amp; lưu</span>
+                <span x-show="occUploading">Đang tải…</span>
             </button>
-            <button type="button" @click="refreshRtabStatus()" class="px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 shrink-0">
+            <button type="button" @click="refreshOccGridStatus()" class="px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 shrink-0">
                 Làm mới trạng thái
             </button>
         </div>
-        <p class="text-xs text-emerald-700 font-medium min-h-[1rem]" x-show="rtabMsg" x-text="rtabMsg"></p>
-        <p class="text-xs text-red-600 min-h-[1rem]" x-show="rtabErr" x-text="rtabErr"></p>
-    </div>
-
-    <!-- Point cloud PLY (Tracking 3D) -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-4">
-        <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-sky-500"></span>
-            Đám mây điểm PLY (Admin Tracking — tab 3D)
-        </p>
-        <p class="text-xs text-slate-500">
-            Tải file <code class="bg-slate-100 px-1 rounded">.ply</code> (ví dụ <code class="font-mono">cloud.ply</code>) để xem trên trang Tracking ở chế độ <strong>Đám mây PLY 3D</strong> (Three.js: xoay, thu phó).
-            Tọa độ robot realtime <code class="font-mono">x, y</code> (MQTT) được vẽ cùng hệ với các đỉnh PLY — cần cùng khung map với RTAB.
-            Railway: đặt <code class="bg-slate-100 px-1 rounded">PLY_MAP_PATH=/data/cloud.ply</code> trên volume giống file <code class="font-mono">.db</code>.
-        </p>
-        <dl class="text-xs space-y-1 font-mono text-slate-700 bg-slate-50 rounded-xl p-3 border border-slate-100">
-            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Đường dẫn server</dt><dd class="break-all" x-text="plyPath || plyMapPath"></dd></div>
-            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Có file</dt><dd><span x-text="plyExists ? 'Có' : 'Chưa'"></span> · <span x-text="plyBytesLabel"></span> · vertex: <span x-text="plyVertexLabel"></span></dd></div>
-        </dl>
-        <div class="flex flex-wrap items-end gap-3">
-            <label class="block min-w-[12rem] flex-1">
-                <span class="text-xs font-medium text-slate-600">Chọn file PLY (.ply)</span>
-                <input type="file" accept=".ply,application/octet-stream" x-ref="plyFile"
-                    class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-sky-100 file:text-sky-800 hover:file:bg-sky-200" />
-            </label>
-            <button type="button" @click="uploadPlyMap()"
-                :disabled="plyUploading"
-                class="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-sky-600 hover:bg-sky-700 disabled:opacity-50 shrink-0">
-                <span x-show="!plyUploading">Tải lên &amp; lưu</span>
-                <span x-show="plyUploading">Đang tải…</span>
-            </button>
-            <button type="button" @click="refreshPlyStatus()" class="px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 shrink-0">
-                Làm mới trạng thái
-            </button>
-        </div>
-        <p class="text-xs text-emerald-700 font-medium min-h-[1rem]" x-show="plyMsg" x-text="plyMsg"></p>
-        <p class="text-xs text-red-600 min-h-[1rem]" x-show="plyErr" x-text="plyErr"></p>
+        <p class="text-xs text-emerald-700 font-medium min-h-[1rem]" x-show="occMsg" x-text="occMsg"></p>
+        <p class="text-xs text-red-600 min-h-[1rem]" x-show="occErr" x-text="occErr"></p>
     </div>
 
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-6">
@@ -372,8 +339,7 @@ function adminSettings(cfg) {
     var topicParaCan = cfg.topicParaCan || 'UGV/para/can';
     var losSaved = cfg.losSaved;
     var canSaved = cfg.canSaved;
-    var rtabMapDbPath = cfg.rtabMapDbPath || '';
-    var plyMapPath = cfg.plyMapPath || '';
+    var occGridMapPath = cfg.occGridMapPath || '';
 
     function buildParaPayload(obj) {
         var out = {};
@@ -440,116 +406,73 @@ function adminSettings(cfg) {
         lastOk: '',
         publishing: false,
         _client: null,
-        rtabMapDbPath: rtabMapDbPath,
-        rtabPath: '',
-        rtabExists: false,
-        rtabBytesLabel: '—',
-        rtabValid: false,
-        rtabUploading: false,
-        rtabMsg: '',
-        rtabErr: '',
-        plyMapPath: plyMapPath,
-        plyPath: '',
-        plyExists: false,
-        plyBytesLabel: '—',
-        plyVertexLabel: '—',
-        plyUploading: false,
-        plyMsg: '',
-        plyErr: '',
+        occGridMapPath: occGridMapPath,
+        occPath: '',
+        occExists: false,
+        occBytesLabel: '—',
+        occWHLabel: '—',
+        occResLabel: '—',
+        occYamlLabel: '—',
+        occUploading: false,
+        occMsg: '',
+        occErr: '',
 
-        async refreshPlyStatus() {
+        async refreshOccGridStatus() {
             var self = this;
             try {
-                var res = await fetch('/api/admin/ply-map/status', { credentials: 'same-origin' });
+                var res = await fetch('/api/admin/occ-grid/status', { credentials: 'same-origin' });
                 var d = await res.json().catch(function () { return null; });
                 if (!d) return;
-                self.plyPath = d.path || '';
-                self.plyExists = !!d.exists;
-                var b = Number(d.bytes) || 0;
-                if (!d.exists) self.plyBytesLabel = '—';
-                else if (b >= 1048576) self.plyBytesLabel = (b / 1048576).toFixed(1) + ' MB';
-                else self.plyBytesLabel = (b / 1024).toFixed(1) + ' KB';
-                self.plyVertexLabel = d.vertex_count != null ? String(d.vertex_count) : '—';
+                self.occPath = d.path || '';
+                self.occExists = !!d.exists;
+                var b = Number(d.size_bytes) || 0;
+                if (!d.exists) self.occBytesLabel = '—';
+                else if (b >= 1048576) self.occBytesLabel = (b / 1048576).toFixed(1) + ' MB';
+                else self.occBytesLabel = (b / 1024).toFixed(1) + ' KB';
+                if (d.width != null && d.height != null) {
+                    self.occWHLabel = d.width + '×' + d.height + ' px';
+                } else {
+                    self.occWHLabel = '—';
+                }
+                self.occResLabel = d.resolution != null ? String(d.resolution) : '—';
+                self.occYamlLabel = d.yaml_used ? 'có' : 'không';
             } catch (e) { /* ignore */ }
         },
 
-        async uploadPlyMap() {
+        async uploadOccGridMap() {
             var self = this;
-            var inp = this.$refs.plyFile;
-            self.plyErr = '';
-            self.plyMsg = '';
+            var inp = this.$refs.occPgmFile;
+            var yInp = this.$refs.occYamlFile;
+            self.occErr = '';
+            self.occMsg = '';
             if (!inp || !inp.files || !inp.files[0]) {
-                self.plyErr = 'Hãy chọn file .ply';
+                self.occErr = 'Hãy chọn file .pgm';
                 return;
             }
             var fd = new FormData();
-            fd.append('file', inp.files[0]);
-            self.plyUploading = true;
+            fd.append('pgm', inp.files[0]);
+            if (yInp && yInp.files && yInp.files[0]) {
+                fd.append('yaml', yInp.files[0]);
+            }
+            self.occUploading = true;
             try {
-                var res = await fetch('/api/admin/ply-map/upload', { method: 'POST', credentials: 'same-origin', body: fd });
+                var res = await fetch('/api/admin/occ-grid/upload', { method: 'POST', credentials: 'same-origin', body: fd });
                 var data = await res.json().catch(function () { return {}; });
                 if (!res.ok) {
                     var det = data.detail;
-                    if (typeof det === 'string') self.plyErr = det;
-                    else if (Array.isArray(det) && det[0] && det[0].msg) self.plyErr = det[0].msg;
-                    else self.plyErr = data.message || ('HTTP ' + res.status);
+                    if (typeof det === 'string') self.occErr = det;
+                    else if (Array.isArray(det) && det[0] && det[0].msg) self.occErr = det[0].msg;
+                    else self.occErr = data.message || ('HTTP ' + res.status);
                     return;
                 }
-                self.plyMsg = data.message || 'Đã lưu PLY.';
-                await self.refreshPlyStatus();
+                self.occMsg = data.message || 'Đã lưu PGM.';
+                await self.refreshOccGridStatus();
                 inp.value = '';
+                if (yInp) yInp.value = '';
             } catch (e) {
-                self.plyErr = e.message || String(e);
+                self.occErr = e.message || String(e);
             } finally {
-                self.plyUploading = false;
-            }
-        },
-
-        async refreshRtabStatus() {
-            var self = this;
-            try {
-                var res = await fetch('/api/admin/rtab-map/status', { credentials: 'same-origin' });
-                var d = await res.json().catch(function () { return null; });
-                if (!d) return;
-                self.rtabPath = d.path || '';
-                self.rtabExists = !!d.exists;
-                var b = Number(d.bytes) || 0;
-                if (!d.exists) self.rtabBytesLabel = '—';
-                else if (b >= 1048576) self.rtabBytesLabel = (b / 1048576).toFixed(1) + ' MB';
-                else self.rtabBytesLabel = (b / 1024).toFixed(1) + ' KB';
-                self.rtabValid = !!d.valid_rtab;
-            } catch (e) { /* ignore */ }
-        },
-
-        async uploadRtabMap() {
-            var self = this;
-            var inp = this.$refs.rtabFile;
-            self.rtabErr = '';
-            self.rtabMsg = '';
-            if (!inp || !inp.files || !inp.files[0]) {
-                self.rtabErr = 'Hãy chọn file .db';
-                return;
-            }
-            var fd = new FormData();
-            fd.append('file', inp.files[0]);
-            self.rtabUploading = true;
-            try {
-                var res = await fetch('/api/admin/rtab-map/upload', { method: 'POST', credentials: 'same-origin', body: fd });
-                var data = await res.json().catch(function () { return {}; });
-                if (!res.ok) {
-                    var det = data.detail;
-                    if (typeof det === 'string') self.rtabErr = det;
-                    else if (Array.isArray(det) && det[0] && det[0].msg) self.rtabErr = det[0].msg;
-                    else self.rtabErr = data.message || ('HTTP ' + res.status);
-                    return;
-                }
-                self.rtabMsg = data.message || 'Đã lưu.';
-                await self.refreshRtabStatus();
-                inp.value = '';
-            } catch (e) {
-                self.rtabErr = e.message || String(e);
-            } finally {
-                self.rtabUploading = false;
+                self.occUploading = false;
             }
         },
 
@@ -643,8 +566,7 @@ function adminSettings(cfg) {
             self._onArrowKeyUp = function (e) { self._handleArrowKeyUp(e); };
             window.addEventListener('keydown', self._onArrowKeyDown, true);
             window.addEventListener('keyup', self._onArrowKeyUp, true);
-            self.refreshRtabStatus();
-            self.refreshPlyStatus();
+            self.refreshOccGridStatus();
         },
 
         _resolveActiveArrowDir() {
