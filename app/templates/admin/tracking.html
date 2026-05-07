@@ -429,28 +429,223 @@
                 }
                 self._bootLock = true;
                 try {
+                var b = null;
+                var installTrackingMqtt = function () {
+                    self._clearAvoidanceOnLeave = function () {
+                        if (avoidWpLayer) avoidWpLayer.clearLayers();
+                        if (plyV) {
+                            try {
+                                plyV.dispose();
+                            } catch (e) {}
+                            plyV = null;
+                        }
+                        self.avoidHasWaypoint = null;
+                        self.avoidHasObstacles = null;
+                        self.avoidWpCount = 0;
+                        self.avoidLastAt = '';
+                        self.avoidJsonPretty = '';
+                    };
+                    window.addEventListener('pagehide', self._clearAvoidanceOnLeave);
+
+                    var client = window.AdminMqtt.connect('', '', function (state, detail) {
+                        self.conn = state;
+                        self.errDetail = detail || '';
+                        var labels = { connected: 'MQTT OK', disconnected: 'Mất kết nối', reconnecting: 'Đang nối lại…', error: 'Lỗi' };
+                        self.connLabel = labels[state] || state;
+                        if (state === 'connected' && client) {
+                            client.subscribe(topicPose, { qos: 0 });
+                            client.subscribe(topicAvoidanceWp, { qos: 0 });
+                        }
+                    });
+
+                    if (client) {
+                        client.on('message', function (t, msg) {
+                            if (t === topicAvoidanceWp) {
+                                var rawAw = msg.toString();
+                                var aw = window.AdminMqtt.safeParseJson(rawAw);
+                                self.avoidJsonPretty = aw ? JSON.stringify(aw, null, 2) : rawAw;
+                                self.avoidLastAt = new Date().toLocaleTimeString('vi-VN');
+                                if (avoidWpLayer) avoidWpLayer.clearLayers();
+                                if (!aw || typeof aw !== 'object') {
+                                    self.avoidHasWaypoint = null;
+                                    self.avoidHasObstacles = null;
+                                    self.avoidWpCount = 0;
+                                    return;
+                                }
+                                if (aw.has_waypoint !== undefined && aw.has_waypoint !== null) {
+                                    self.avoidHasWaypoint = Boolean(aw.has_waypoint);
+                                } else {
+                                    self.avoidHasWaypoint = null;
+                                }
+                                var ho = aw.has_avoid_obstacles;
+                                if (ho === undefined || ho === null) ho = aw.has_obstacles;
+                                if (ho !== undefined && ho !== null) {
+                                    self.avoidHasObstacles = Boolean(ho);
+                                } else {
+                                    self.avoidHasObstacles = null;
+                                }
+                                var xs = aw.wp_x, ys = aw.wp_y;
+                                if (!Array.isArray(xs) || !Array.isArray(ys)) {
+                                    self.avoidWpCount = 0;
+                                    if (plyV) plyV.syncAvoidance([], []);
+                                    return;
+                                }
+                                var n = Math.min(xs.length, ys.length);
+                                self.avoidWpCount = n;
+                                if (n === 0) {
+                                    if (plyV) plyV.syncAvoidance([], []);
+                                    return;
+                                }
+                                var latlngs = [];
+                                for (var ai = 0; ai < n; ai++) {
+                                    var ax = Number(xs[ai]), ay = Number(ys[ai]);
+                                    if (isNaN(ax) || isNaN(ay)) continue;
+                                    var all = graphBounds ? poseToMapLL(ax, ay) : null;
+                                    if (all) latlngs.push({ ll: all, ax: ax, ay: ay });
+                                    else latlngs.push({ ll: null, ax: ax, ay: ay });
+                                }
+                                if (avoidWpLayer) avoidWpLayer.clearLayers();
+                                var latlngOnly = latlngs.filter(function (q) { return q.ll; });
+                                if (latlngOnly.length > 1 && avoidWpLayer) {
+                                    L.polyline(latlngOnly.map(function (q) { return q.ll; }), {
+                                        color: '#d97706',
+                                        weight: 3,
+                                        opacity: 0.9,
+                                        dashArray: '10,8',
+                                        lineCap: 'round',
+                                        lineJoin: 'round',
+                                    }).addTo(avoidWpLayer);
+                                }
+                                latlngOnly.forEach(function (q) {
+                                    L.circleMarker(q.ll, {
+                                        radius: 5,
+                                        color: '#b45309',
+                                        weight: 2,
+                                        fillColor: '#fbbf24',
+                                        fillOpacity: 0.95,
+                                    }).addTo(avoidWpLayer).bindPopup(
+                                        '<div class="text-xs font-mono">né vật cản<br>x=' + q.ax.toFixed(4) + ' y=' + q.ay.toFixed(4) + ' m</div>'
+                                    );
+                                });
+                                if (self.mapTab === 'ply' && plyV) {
+                                    var axs = [];
+                                    var ays = [];
+                                    latlngs.forEach(function (q) {
+                                        axs.push(q.ax);
+                                        ays.push(q.ay);
+                                    });
+                                    plyV.syncAvoidance(axs, ays);
+                                }
+                                return;
+                            }
+                            if (t !== topicPose) return;
+                            var raw = msg.toString();
+                            var o = window.AdminMqtt.safeParseJson(raw);
+                            if (!o || o.x == null || o.y == null) return;
+                            var nx = Number(o.x);
+                            var ny = Number(o.y);
+                            if (isNaN(nx) || isNaN(ny)) return;
+                            var yw = o.yaw != null && !isNaN(Number(o.yaw)) ? Number(o.yaw) : null;
+                            self.poseX = nx.toFixed(4);
+                            self.poseY = ny.toFixed(4);
+                            self.poseYaw = yw != null ? yw.toFixed(4) : '—';
+
+                            var deg = yw != null ? (-(yw * 180 / Math.PI)) : null;
+                            currentHeadingDeg = deg;
+                            updateRobotIcon();
+
+                            lastPoseWorld = { nx: nx, ny: ny, yw: yw };
+
+                            var ll = poseToMapLL(nx, ny);
+                            if (ll && robotMarker) {
+                                robotMarker.setLatLng(ll);
+                            }
+
+                            if (self.mapTab === 'ply' && plyV) {
+                                plyV.setRobotXYYaw(nx, ny, yw);
+                                var domP = false;
+                                if (plyTrailLast) {
+                                    var dp = haversineMeters(plyTrailLast, [nx, ny]);
+                                    if (dp < MIN_TRAIL_DIST) domP = true;
+                                }
+                                if (!domP) {
+                                    plyV.pushTrail(nx, ny);
+                                    plyTrailLast = [nx, ny];
+                                }
+                            } else {
+                                plyTrailLast = null;
+                            }
+
+                            if (!ll || !trailLine) return;
+
+                            var dominated = false;
+                            if (trailCoords.length > 0 && b) {
+                                var prev = trailCoords[trailCoords.length - 1];
+                                var pw = mapGraphAlignedLatLngToWorld(prev, b);
+                                var d = haversineMeters(pw, [nx, ny]);
+                                if (d < MIN_TRAIL_DIST) dominated = true;
+                            }
+                            if (!dominated) {
+                                trailCoords.push(ll);
+                                trailLine.addLatLng(ll);
+                                self.trailCount = trailCoords.length;
+                            }
+                        });
+                    }
+                };
                 /* Leaflet: không gọi L.map() hai lần trên cùng #admin-map (race khi init/async). */
                 if (map !== null && graphBounds) {
                     self.graphErr = '';
+                    b = graphBounds;
                     await self.refreshPlyStatus();
                     if (map && !avoidWpLayer) {
                         avoidWpLayer = L.layerGroup().addTo(map);
                     }
                     await self._loadWaypointGraphOverlay();
+                    installTrackingMqtt();
                     return;
                 }
                 var res = await fetch(graphUrl, { credentials: 'same-origin' });
                 var graph = await res.json().catch(function () { return null; });
                 if (!graph || !graph.success) {
                     self.graphOptMapMissing = false;
-                    self.graphErr = (graph && graph.message) || 'API graph không hợp lệ';
                     await self.refreshPlyStatus();
+                    if (!self.plyAvailable) {
+                        self.graphErr = (graph && graph.message) || 'API graph không hợp lệ';
+                        return;
+                    }
+                    self.graphErr = '';
+                    self.graphMeta =
+                        ((graph && graph.message) ? graph.message + ' — ' : '') +
+                        'Chưa có RTAB .db — chỉ dùng tab **Đám mây PLY 3D** (đám mây đã lấy mẫu theo stride).';
+                    graphBounds = null;
+                    b = graphBounds;
+                    self.mapTab = 'ply';
+                    self.mapReady = true;
+                    if (!self._trackingResizeHook) {
+                        self._trackingResizeHook = true;
+                        onWinResize = function () {
+                            if (plyV) {
+                                try {
+                                    plyV.resize();
+                                } catch (e) {}
+                            }
+                            if (map) {
+                                try {
+                                    map.invalidateSize();
+                                } catch (e2) {}
+                            }
+                        };
+                        window.addEventListener('resize', onWinResize);
+                    }
+                    await self.ensurePlyViewer();
+                    installTrackingMqtt();
                     return;
                 }
                 self.graphOptMapMissing = graph.admin_opt_map_available === false;
                 graphBounds = graph.bounds;
                 self.graphErr = '';
-                var b = graphBounds;
+                b = graphBounds;
                 var h = b.ymax - b.ymin;
                 var w = b.xmax - b.xmin;
                 var envN = (graph.env_points && graph.env_points.length) ? graph.env_points.length : 0;
@@ -673,167 +868,7 @@
 
                 await self._loadWaypointGraphOverlay();
 
-                self._clearAvoidanceOnLeave = function () {
-                    if (avoidWpLayer) avoidWpLayer.clearLayers();
-                    if (plyV) {
-                        try {
-                            plyV.dispose();
-                        } catch (e) {}
-                        plyV = null;
-                    }
-                    self.avoidHasWaypoint = null;
-                    self.avoidHasObstacles = null;
-                    self.avoidWpCount = 0;
-                    self.avoidLastAt = '';
-                    self.avoidJsonPretty = '';
-                };
-                window.addEventListener('pagehide', self._clearAvoidanceOnLeave);
-
-                var client = window.AdminMqtt.connect('', '', function (state, detail) {
-                    self.conn = state;
-                    self.errDetail = detail || '';
-                    var labels = { connected: 'MQTT OK', disconnected: 'Mất kết nối', reconnecting: 'Đang nối lại…', error: 'Lỗi' };
-                    self.connLabel = labels[state] || state;
-                    if (state === 'connected' && client) {
-                        client.subscribe(topicPose, { qos: 0 });
-                        client.subscribe(topicAvoidanceWp, { qos: 0 });
-                    }
-                });
-
-                if (client) {
-                    client.on('message', function (t, msg) {
-                        if (t === topicAvoidanceWp) {
-                            var rawAw = msg.toString();
-                            var aw = window.AdminMqtt.safeParseJson(rawAw);
-                            self.avoidJsonPretty = aw ? JSON.stringify(aw, null, 2) : rawAw;
-                            self.avoidLastAt = new Date().toLocaleTimeString('vi-VN');
-                            if (avoidWpLayer) avoidWpLayer.clearLayers();
-                            if (!aw || typeof aw !== 'object') {
-                                self.avoidHasWaypoint = null;
-                                self.avoidHasObstacles = null;
-                                self.avoidWpCount = 0;
-                                return;
-                            }
-                            if (aw.has_waypoint !== undefined && aw.has_waypoint !== null) {
-                                self.avoidHasWaypoint = Boolean(aw.has_waypoint);
-                            } else {
-                                self.avoidHasWaypoint = null;
-                            }
-                            var ho = aw.has_avoid_obstacles;
-                            if (ho === undefined || ho === null) ho = aw.has_obstacles;
-                            if (ho !== undefined && ho !== null) {
-                                self.avoidHasObstacles = Boolean(ho);
-                            } else {
-                                self.avoidHasObstacles = null;
-                            }
-                            var xs = aw.wp_x, ys = aw.wp_y;
-                            if (!Array.isArray(xs) || !Array.isArray(ys)) {
-                                self.avoidWpCount = 0;
-                                if (plyV) plyV.syncAvoidance([], []);
-                                return;
-                            }
-                            var n = Math.min(xs.length, ys.length);
-                            self.avoidWpCount = n;
-                            if (n === 0) {
-                                if (plyV) plyV.syncAvoidance([], []);
-                                return;
-                            }
-                            var latlngs = [];
-                            for (var ai = 0; ai < n; ai++) {
-                                var ax = Number(xs[ai]), ay = Number(ys[ai]);
-                                if (isNaN(ax) || isNaN(ay)) continue;
-                                var all = graphBounds ? poseToMapLL(ax, ay) : null;
-                                if (all) latlngs.push({ ll: all, ax: ax, ay: ay });
-                                else latlngs.push({ ll: null, ax: ax, ay: ay });
-                            }
-                            if (avoidWpLayer) avoidWpLayer.clearLayers();
-                            var latlngOnly = latlngs.filter(function (q) { return q.ll; });
-                            if (latlngOnly.length > 1 && avoidWpLayer) {
-                                L.polyline(latlngOnly.map(function (q) { return q.ll; }), {
-                                    color: '#d97706',
-                                    weight: 3,
-                                    opacity: 0.9,
-                                    dashArray: '10,8',
-                                    lineCap: 'round',
-                                    lineJoin: 'round',
-                                }).addTo(avoidWpLayer);
-                            }
-                            latlngOnly.forEach(function (q) {
-                                L.circleMarker(q.ll, {
-                                    radius: 5,
-                                    color: '#b45309',
-                                    weight: 2,
-                                    fillColor: '#fbbf24',
-                                    fillOpacity: 0.95,
-                                }).addTo(avoidWpLayer).bindPopup(
-                                    '<div class="text-xs font-mono">né vật cản<br>x=' + q.ax.toFixed(4) + ' y=' + q.ay.toFixed(4) + ' m</div>'
-                                );
-                            });
-                            if (self.mapTab === 'ply' && plyV) {
-                                var axs = [];
-                                var ays = [];
-                                latlngs.forEach(function (q) {
-                                    axs.push(q.ax);
-                                    ays.push(q.ay);
-                                });
-                                plyV.syncAvoidance(axs, ays);
-                            }
-                            return;
-                        }
-                        if (t !== topicPose) return;
-                        var raw = msg.toString();
-                        var o = window.AdminMqtt.safeParseJson(raw);
-                        if (!o || o.x == null || o.y == null) return;
-                        var nx = Number(o.x);
-                        var ny = Number(o.y);
-                        if (isNaN(nx) || isNaN(ny)) return;
-                        var yw = o.yaw != null && !isNaN(Number(o.yaw)) ? Number(o.yaw) : null;
-                        self.poseX = nx.toFixed(4);
-                        self.poseY = ny.toFixed(4);
-                        self.poseYaw = yw != null ? yw.toFixed(4) : '—';
-
-                        var deg = yw != null ? (-(yw * 180 / Math.PI)) : null;
-                        currentHeadingDeg = deg;
-                        updateRobotIcon();
-
-                        lastPoseWorld = { nx: nx, ny: ny, yw: yw };
-
-                        var ll = poseToMapLL(nx, ny);
-                        if (ll && robotMarker) {
-                            robotMarker.setLatLng(ll);
-                        }
-
-                        if (self.mapTab === 'ply' && plyV) {
-                            plyV.setRobotXYYaw(nx, ny, yw);
-                            var domP = false;
-                            if (plyTrailLast) {
-                                var dp = haversineMeters(plyTrailLast, [nx, ny]);
-                                if (dp < MIN_TRAIL_DIST) domP = true;
-                            }
-                            if (!domP) {
-                                plyV.pushTrail(nx, ny);
-                                plyTrailLast = [nx, ny];
-                            }
-                        } else {
-                            plyTrailLast = null;
-                        }
-
-                        if (!ll || !trailLine) return;
-
-                        var dominated = false;
-                        if (trailCoords.length > 0) {
-                            var prev = trailCoords[trailCoords.length - 1];
-                            var pw = mapGraphAlignedLatLngToWorld(prev, b);
-                            var d = haversineMeters(pw, [nx, ny]);
-                            if (d < MIN_TRAIL_DIST) dominated = true;
-                        }
-                        if (!dominated) {
-                            trailCoords.push(ll);
-                            trailLine.addLatLng(ll);
-                            self.trailCount = trailCoords.length;
-                        }
-                    });
-                }
+                installTrackingMqtt();
                 } finally {
                     self._bootLock = false;
                 }

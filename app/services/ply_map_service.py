@@ -160,8 +160,26 @@ def _ascii_vertex_line_to_xyz(
         return None
 
 
+def _ply_data_start_byte(path: Path) -> Optional[int]:
+    """Byte offset trong file ngay sau dòng ``end_header``."""
+    raw_acc = b""
+    with path.open("rb") as f:
+        while b"end_header" not in raw_acc and len(raw_acc) < 2_000_000:
+            piece = f.read(65536)
+            if not piece:
+                break
+            raw_acc += piece
+    end = raw_acc.find(b"end_header")
+    if end < 0:
+        return None
+    nl = raw_acc.find(b"\n", end)
+    if nl < 0:
+        return None
+    return nl + 1
+
+
 def build_ply_preview_payload(path: Optional[str] = None) -> Dict[str, Any]:
-    """Trả bounds + positions float32 xyz (base64), giới hạn số điểm bằng stride."""
+    """Trả bounds + positions float32 xyz (base64), giới hạn số điểm bằng stride. Đọc stream — không nạp cả file vào RAM."""
     p = Path(path or PLY_MAP_PATH).resolve()
     if not p.is_file():
         return {"success": False, "message": "Không có file PLY trên server."}
@@ -189,54 +207,57 @@ def build_ply_preview_payload(path: Optional[str] = None) -> Dict[str, Any]:
     out_xyz = bytearray()
 
     try:
-        raw = p.read_bytes()
-        hend = raw.find(b"end_header")
-        if hend < 0:
-            return {"success": False, "message": "Thiếu end_header."}
-        nl = raw.find(b"\n", hend)
-        if nl < 0:
-            return {"success": False, "message": "Header PLY lỗi."}
-        data_start = nl + 1
-        body = raw[data_start:]
+        data_start = _ply_data_start_byte(p)
+        if data_start is None:
+            return {"success": False, "message": "Thiếu end_header / header PLY lỗi."}
 
         if fmt == "ascii":
-            text = body.decode("utf-8", errors="replace").splitlines()
-            for vi, line in enumerate(text):
-                if vi >= vcount:
-                    break
-                if vi % stride != 0:
-                    continue
-                line = line.strip()
-                if not line:
-                    continue
-                t = _ascii_vertex_line_to_xyz(line, props, xyz_idx)
-                if not t:
-                    continue
-                x, y, z = t
-                xs.append(x)
-                ys.append(y)
-                zs.append(z)
-                out_xyz.extend(struct.pack("<fff", x, y, z))
+            with p.open("rb") as f:
+                f.seek(data_start)
+                for vi in range(vcount):
+                    raw_line = f.readline()
+                    if not raw_line:
+                        break
+                    if vi % stride != 0:
+                        continue
+                    try:
+                        line = raw_line.decode("utf-8", errors="replace").strip()
+                    except UnicodeError:
+                        continue
+                    if not line:
+                        continue
+                    t = _ascii_vertex_line_to_xyz(line, props, xyz_idx)
+                    if not t:
+                        continue
+                    x, y, z = t
+                    xs.append(x)
+                    ys.append(y)
+                    zs.append(z)
+                    out_xyz.extend(struct.pack("<fff", x, y, z))
         else:
-            if len(body) < vcount * row_size:
+            need_bytes = vcount * row_size
+            if p.stat().st_size < data_start + need_bytes:
                 return {"success": False, "message": "File PLY binary ngắn hơn số vertex khai báo."}
-            off = 0
-            for vi in range(vcount):
-                row = body[off : off + row_size]
-                off += row_size
-                if vi % stride != 0:
-                    continue
-                try:
-                    vals = struct.unpack(row_fmt, row)
-                except struct.error:
-                    continue
-                x = float(vals[xyz_idx[0]])
-                y = float(vals[xyz_idx[1]])
-                z = float(vals[xyz_idx[2]])
-                xs.append(x)
-                ys.append(y)
-                zs.append(z)
-                out_xyz.extend(struct.pack("<fff", x, y, z))
+            with p.open("rb") as f:
+                f.seek(data_start)
+                for vi in range(vcount):
+                    if vi % stride != 0:
+                        f.seek(row_size, os.SEEK_CUR)
+                        continue
+                    row = f.read(row_size)
+                    if len(row) < row_size:
+                        break
+                    try:
+                        vals = struct.unpack(row_fmt, row)
+                    except struct.error:
+                        continue
+                    x = float(vals[xyz_idx[0]])
+                    y = float(vals[xyz_idx[1]])
+                    z = float(vals[xyz_idx[2]])
+                    xs.append(x)
+                    ys.append(y)
+                    zs.append(z)
+                    out_xyz.extend(struct.pack("<fff", x, y, z))
     except (OSError, MemoryError) as exc:
         return {"success": False, "message": str(exc)}
 
