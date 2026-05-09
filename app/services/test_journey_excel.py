@@ -1,13 +1,16 @@
 """
 Xuất log hành trình test MQTT ra Excel dạng **wide / snapshot**:
-mỗi bản tin log = một dòng (theo đúng tốc độ ghi nhận), các cột là giá trị mới nhất
-(carry-forward) sau khi áp dụng bản tin đó.
+- **10 Hz** (một dòng / 100 ms): bucket theo mốc thời gian neo từ **timestamp_local** đã parse;
+  phần mili-giây trong cùng giây lấy từ **ISO ``t``** nếu có (để đủ độ phân giải khi ``t_local`` chỉ có tới giây).
+- Cột thời gian: chỉ **timestamp_local** (không còn ``timestamp_iso``).
 """
 
 from __future__ import annotations
 
 import io
 import json
+import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import MQTT_TOPIC_STATUS, ROBOT_STATUS_UGV_TOPICS
@@ -219,8 +222,89 @@ def _merge_payload(state: Dict[str, Any], msg_key: str, o: dict) -> None:
         return
 
 
-def _sort_key(row: dict) -> str:
-    return str(row.get("t") or "")
+_BUCKET_MS = 100
+_EPOCH_NAIVE = datetime(1970, 1, 1)
+
+
+def _naive_datetime_to_sort_ms(dt: datetime) -> int:
+    """Độ lệch ms (lịch naive) từ 1970-01-01 — dùng cho `t_local` không gắn timezone máy chủ."""
+    if dt.tzinfo is not None:
+        dt = dt.replace(tzinfo=None)
+    return int((dt - _EPOCH_NAIVE).total_seconds() * 1000)
+
+
+def _try_parse_t_local(s: str) -> Optional[datetime]:
+    """Parse chuỗi kiểu trình duyệt vi-VN, ví dụ ``16:18:17 9/5/2026`` hoặc ``9/5/2026, 16:18:17``."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    m = re.search(r"(\d{1,2}):(\d{1,2}):(\d{1,2})\s+(\d{1,2})/(\d{1,2})/(\d{4})", s)
+    if m:
+        h, mi, se, d, mo, y = (int(g) for g in m.groups())
+        try:
+            return datetime(y, mo, d, h, mi, se)
+        except ValueError:
+            return None
+    m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})[,\s]+(\d{1,2}):(\d{1,2}):(\d{1,2})", s)
+    if m:
+        d, mo, y, h, mi, se = (int(g) for g in m.groups())
+        try:
+            return datetime(y, mo, d, h, mi, se)
+        except ValueError:
+            return None
+    return None
+
+
+def _iso_fraction_ms(iso: str) -> int:
+    """Phần mili-giây 0..999 từ chuỗi ISO (vd ``...17.123Z``) nếu có."""
+    s = (iso or "").strip()
+    if "." not in s:
+        return 0
+    try:
+        after = s.split(".", 1)[1]
+        for sep in ("Z", "+", "-"):
+            if sep in after:
+                after = after.split(sep, 1)[0]
+                break
+        digits = "".join(ch for ch in after if ch.isdigit())
+        if not digits:
+            return 0
+        digits = (digits + "000")[:3]
+        return int(digits)
+    except (ValueError, IndexError):
+        return 0
+
+
+def _try_iso_to_epoch_ms(s: str) -> Optional[int]:
+    t = (s or "").strip()
+    if not t:
+        return None
+    if t.endswith("Z"):
+        t = t[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(t)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except (ValueError, TypeError, OSError):
+        return None
+
+
+def _row_timeline_ms(row: dict) -> int:
+    """Trục thời gian cho sắp xếp và bucket 10 Hz: neo theo ``t_local`` (lịch), bù phần ms từ ``t`` ISO nếu có."""
+    loc = str(row.get("t_local") or "").strip()
+    iso = str(row.get("t") or "").strip()
+    dt_loc = _try_parse_t_local(loc) if loc else None
+    if dt_loc is not None:
+        base = (_naive_datetime_to_sort_ms(dt_loc) // 1000) * 1000
+        return base + min(_iso_fraction_ms(iso), 999)
+    return _try_iso_to_epoch_ms(iso) or 0
+
+
+def _sorted_dict_rows(rows: List[Any]) -> List[dict]:
+    pairs = [(i, r) for i, r in enumerate(rows) if isinstance(r, dict)]
+    pairs.sort(key=lambda ir: (_row_timeline_ms(ir[1]), ir[0]))
+    return [r for _, r in pairs]
 
 
 def _ingest_log_row(state: Dict[str, Any], r: dict, topic_map: Dict[str, str]) -> None:
@@ -243,8 +327,8 @@ def _ingest_log_row(state: Dict[str, Any], r: dict, topic_map: Dict[str, str]) -
         state["has_moving"] = hm
 
 
-def _append_snapshot_row(ws: Any, state: Dict[str, Any], ts: str, loc: str, topic: str, data_cols: Tuple[str, ...]) -> None:
-    out_row: List[Any] = [ts, loc, topic]
+def _append_snapshot_row(ws: Any, state: Dict[str, Any], loc: str, topic: str, data_cols: Tuple[str, ...]) -> None:
+    out_row: List[Any] = [loc, topic]
     for col in data_cols:
         v = state.get(col)
         if v is None:
@@ -300,22 +384,29 @@ def build_test_journey_xlsx_bytes(rows: List[Any], max_input_rows: int = 50_000)
     topic_map = _topic_to_message_key()
     state: Dict[str, Any] = {c: None for c in _DATA_COLS}
 
-    sorted_rows = sorted((r for r in rows if isinstance(r, dict)), key=_sort_key)
+    sorted_rows = _sorted_dict_rows(rows)
 
     wb = Workbook()
     ws = wb.active
     ws.title = "robot_snapshot"
-    head = ["timestamp_iso", "timestamp_local", "topic"] + list(_DATA_COLS)
+    head = ["timestamp_local", "topic"] + list(_DATA_COLS)
     ws.append(head)
     for c in ws[1]:
         c.font = Font(bold=True)
 
+    prev_bid: Optional[int] = None
+    emit_loc, emit_topic = "", ""
+
     for r in sorted_rows:
+        bid = _row_timeline_ms(r) // _BUCKET_MS
+        if prev_bid is not None and bid != prev_bid:
+            _append_snapshot_row(ws, state, emit_loc, emit_topic, _DATA_COLS)
         _ingest_log_row(state, r, topic_map)
-        ts = str(r.get("t") or "")
-        loc = str(r.get("t_local") or "")
-        topic = str(r.get("topic") or "")
-        _append_snapshot_row(ws, state, ts, loc, topic, _DATA_COLS)
+        emit_loc = str(r.get("t_local") or "")
+        emit_topic = str(r.get("topic") or "")
+        prev_bid = bid
+    if prev_bid is not None:
+        _append_snapshot_row(ws, state, emit_loc, emit_topic, _DATA_COLS)
 
     buf = io.BytesIO()
     wb.save(buf)
