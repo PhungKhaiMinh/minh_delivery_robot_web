@@ -1,15 +1,22 @@
 """
 Xuất log hành trình test MQTT ra Excel dạng **wide / snapshot**:
-mỗi dòng = một thời điểm nhận tin, các cột là giá trị mới nhất (carry-forward) của từng thông số.
+- Gộp theo bucket **100 ms (10 Hz)** theo `timestamp_iso`: mọi bản tin trong cùng 100 ms
+  được merge theo thứ tự, **một dòng Excel** cho snapshot cuối bucket.
+- Mỗi dòng: thời điểm + `topic` (bản tin cuối trong bucket) + các cột thông số (carry-forward).
 """
 
 from __future__ import annotations
 
 import io
 import json
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import MQTT_TOPIC_STATUS, ROBOT_STATUS_UGV_TOPICS
+
+# Xuất Excel tối đa 10 hàng/giây: gộp mọi bản tin trong cùng bucket 100 ms,
+# merge state theo thứ tự thời gian, mỗi bucket một dòng.
+_SAMPLE_BUCKET_MS = 100
 
 
 def _topic_to_message_key() -> Dict[str, str]:
@@ -45,27 +52,51 @@ def _to_float(v: Any) -> Optional[float]:
         return None
 
 
-def _pick_vel_left(o: dict) -> Optional[float]:
-    return _to_float(o.get("left")) or _to_float(o.get("left_vel")) or _dig_float(o, "real_vel", "left_vel")
-
-
-def _pick_vel_right(o: dict) -> Optional[float]:
-    return _to_float(o.get("right")) or _to_float(o.get("right_vel")) or _dig_float(o, "real_vel", "right_vel")
-
-
-def _pick_ctrl_left(o: dict) -> Optional[float]:
-    return _to_float(o.get("left")) or _to_float(o.get("left_vel")) or _dig_float(o, "control_vel", "left_vel")
-
-
-def _pick_ctrl_right(o: dict) -> Optional[float]:
-    return _to_float(o.get("right")) or _to_float(o.get("right_vel")) or _dig_float(o, "control_vel", "right_vel")
-
-
 def _dig_float(o: dict, a: str, b: str) -> Optional[float]:
     sub = o.get(a)
     if isinstance(sub, dict) and b in sub:
         return _to_float(sub.get(b))
     return None
+
+
+def _pick_vel_left(o: dict) -> Optional[float]:
+    x = _to_float(o.get("left"))
+    if x is not None:
+        return x
+    x = _to_float(o.get("left_vel"))
+    if x is not None:
+        return x
+    return _dig_float(o, "real_vel", "left_vel")
+
+
+def _pick_vel_right(o: dict) -> Optional[float]:
+    x = _to_float(o.get("right"))
+    if x is not None:
+        return x
+    x = _to_float(o.get("right_vel"))
+    if x is not None:
+        return x
+    return _dig_float(o, "real_vel", "right_vel")
+
+
+def _pick_ctrl_left(o: dict) -> Optional[float]:
+    x = _to_float(o.get("left"))
+    if x is not None:
+        return x
+    x = _to_float(o.get("left_vel"))
+    if x is not None:
+        return x
+    return _dig_float(o, "control_vel", "left_vel")
+
+
+def _pick_ctrl_right(o: dict) -> Optional[float]:
+    x = _to_float(o.get("right"))
+    if x is not None:
+        return x
+    x = _to_float(o.get("right_vel"))
+    if x is not None:
+        return x
+    return _dig_float(o, "control_vel", "right_vel")
 
 
 def _boolish(v: Any) -> Optional[bool]:
@@ -126,12 +157,26 @@ def _merge_payload(state: Dict[str, Any], msg_key: str, o: dict) -> None:
         v = _to_float(la)
         if v is not None:
             state["para_look_ahead"] = v
+        ct = _to_float(o.get("cross_track"))
+        if ct is not None:
+            state["para_cross_track"] = ct
+        at = _to_float(o.get("along_track"))
+        if at is not None:
+            state["para_along_track"] = at
+        dh = _to_float(o.get("desired_heading"))
+        if dh is not None:
+            state["para_desired_heading"] = dh
         return
     if msg_key == "byte_per_sec":
-        if "byte_sensor" in o or "byte_yaw" in o:
-            state["byte_sensor"] = _to_float(o.get("byte_sensor")) or _to_float(o.get("byte_yaw"))
+        bs = _to_float(o.get("byte_sensor"))
+        if bs is None:
+            bs = _to_float(o.get("byte_yaw"))
+        if bs is not None:
+            state["byte_sensor"] = bs
         if "byte_vel" in o:
-            state["byte_vel"] = _to_float(o.get("byte_vel"))
+            bv = _to_float(o.get("byte_vel"))
+            if bv is not None:
+                state["byte_vel"] = bv
         return
     if msg_key == "state_gps":
         if "mode_gps" in o:
@@ -184,10 +229,67 @@ def _sort_key(row: dict) -> str:
     return str(row.get("t") or "")
 
 
-# Cột dữ liệu (không gồm 3 cột đầu timestamp + topic)
+def _row_time_ms(row: dict) -> int:
+    s = str(row.get("t") or "").strip()
+    if not s:
+        return 0
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except (ValueError, TypeError, OSError):
+        return 0
+
+
+def _ingest_log_row(state: Dict[str, Any], r: dict, topic_map: Dict[str, str]) -> None:
+    topic = str(r.get("topic") or "")
+    payload = str(r.get("payload") or "")
+    msg_key = topic_map.get(topic)
+    if msg_key:
+        o = _json_obj(payload)
+        if o is not None:
+            _merge_payload(state, msg_key, o)
+        elif msg_key in ("heading", "heading_gps"):
+            n = _to_float(str(payload).strip())
+            if n is not None:
+                if msg_key == "heading":
+                    state["heading"] = n
+                else:
+                    state["heading_gps"] = n
+    hm = r.get("has_moving")
+    if hm is True or hm is False:
+        state["has_moving"] = hm
+
+
+def _append_snapshot_row(ws: Any, state: Dict[str, Any], ts: str, loc: str, topic: str, data_cols: Tuple[str, ...]) -> None:
+    out_row: List[Any] = [ts, loc, topic]
+    for col in data_cols:
+        v = state.get(col)
+        if v is None:
+            out_row.append("")
+        elif isinstance(v, bool):
+            out_row.append("TRUE" if v else "FALSE")
+        elif isinstance(v, float):
+            out_row.append(v)
+        else:
+            out_row.append(str(v))
+    max_cell = 32000
+    for i, cell in enumerate(out_row):
+        if isinstance(cell, str) and len(cell) > max_cell:
+            out_row[i] = cell[: max_cell - 24] + "…(truncated)"
+    ws.append(out_row)
+
+
+# Cột dữ liệu: desired_heading kề pose_yaw để so sánh heading điều khiển vs pose.
 _DATA_COLS: Tuple[str, ...] = (
     "pose_x",
     "pose_y",
+    "para_cross_track",
+    "para_along_track",
+    "para_desired_heading",
     "pose_yaw",
     "has_moving",
     "has_locked",
@@ -229,45 +331,20 @@ def build_test_journey_xlsx_bytes(rows: List[Any], max_input_rows: int = 50_000)
     for c in ws[1]:
         c.font = Font(bold=True)
 
+    prev_bid: Optional[int] = None
+    emit_ts, emit_loc, emit_topic = "", "", ""
+
     for r in sorted_rows:
-        ts = str(r.get("t") or "")
-        loc = str(r.get("t_local") or "")
-        topic = str(r.get("topic") or "")
-        payload = str(r.get("payload") or "")
-
-        msg_key = topic_map.get(topic)
-        if msg_key:
-            o = _json_obj(payload)
-            if o is not None:
-                _merge_payload(state, msg_key, o)
-            elif msg_key == "heading" or msg_key == "heading_gps":
-                n = _to_float(str(payload).strip())
-                if n is not None:
-                    if msg_key == "heading":
-                        state["heading"] = n
-                    else:
-                        state["heading_gps"] = n
-
-        hm = r.get("has_moving")
-        if hm is True or hm is False:
-            state["has_moving"] = hm
-
-        out_row: List[Any] = [ts, loc, topic]
-        for col in _DATA_COLS:
-            v = state.get(col)
-            if v is None:
-                out_row.append("")
-            elif isinstance(v, bool):
-                out_row.append("TRUE" if v else "FALSE")
-            elif isinstance(v, float):
-                out_row.append(v)
-            else:
-                out_row.append(str(v))
-        max_cell = 32000
-        for i, cell in enumerate(out_row):
-            if isinstance(cell, str) and len(cell) > max_cell:
-                out_row[i] = cell[: max_cell - 24] + "…(truncated)"
-        ws.append(out_row)
+        bid = _row_time_ms(r) // _SAMPLE_BUCKET_MS
+        if prev_bid is not None and bid != prev_bid:
+            _append_snapshot_row(ws, state, emit_ts, emit_loc, emit_topic, _DATA_COLS)
+        _ingest_log_row(state, r, topic_map)
+        emit_ts = str(r.get("t") or "")
+        emit_loc = str(r.get("t_local") or "")
+        emit_topic = str(r.get("topic") or "")
+        prev_bid = bid
+    if prev_bid is not None:
+        _append_snapshot_row(ws, state, emit_ts, emit_loc, emit_topic, _DATA_COLS)
 
     buf = io.BytesIO()
     wb.save(buf)
