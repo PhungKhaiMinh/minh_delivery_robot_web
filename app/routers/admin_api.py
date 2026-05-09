@@ -2,7 +2,6 @@
 API JSON cho Admin Dashboard (yêu cầu role admin).
 """
 
-import io
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -32,6 +31,7 @@ from app.services.admin_settings_store import (
     set_los_last_params,
 )
 from app.services.auth_service import require_admin
+from app.services.test_journey_excel import build_test_journey_xlsx_bytes
 from app.services.booking_service import get_admin_queue_bookings
 from app.services.pathfinding_service import (
     get_route_coords,
@@ -341,7 +341,7 @@ async def admin_test_route_publish(request: Request):
 
 @router.post("/test-route/journey-log/export")
 async def admin_test_route_journey_log_export(request: Request):
-    """Xuất log MQTT (robot status + topic UGV) trong một lần test thực địa ra file .xlsx."""
+    """Xuất log MQTT ra .xlsx dạng snapshot: mỗi dòng = một sự kiện, các cột là thông số mới nhất (carry-forward)."""
     require_admin(request)
     try:
         body = await request.json()
@@ -350,39 +350,12 @@ async def admin_test_route_journey_log_export(request: Request):
     rows: List[Any] = body.get("rows") or []
     if not isinstance(rows, list):
         raise HTTPException(status_code=400, detail="Thiếu hoặc sai kiểu rows (mảng).")
-    if len(rows) > 50_000:
-        raise HTTPException(status_code=400, detail="Tối đa 50000 dòng mỗi file.")
-
-    from openpyxl import Workbook  # type: ignore
-    from openpyxl.styles import Font  # type: ignore
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "robot_status"
-    headers = ["timestamp_iso", "timestamp_local", "topic", "payload", "has_moving"]
-    ws.append(headers)
-    for c in ws[1]:
-        c.font = Font(bold=True)
-    max_cell = 32000
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        ts = str(r.get("t") or "")
-        loc = str(r.get("t_local") or "")
-        topic = str(r.get("topic") or "")
-        payload = str(r.get("payload") or "")
-        if len(payload) > max_cell:
-            payload = payload[:max_cell] + "…(truncated)"
-        hm = r.get("has_moving")
-        if hm is True or hm is False:
-            hm_s = "true" if hm else "false"
-        else:
-            hm_s = ""
-        ws.append([ts, loc, topic, payload, hm_s])
-    buf = io.BytesIO()
-    wb.save(buf)
+    try:
+        xlsx = build_test_journey_xlsx_bytes(rows)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return Response(
-        content=buf.getvalue(),
+        content=xlsx,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": 'attachment; filename="test_field_robot_status_log.xlsx"',
