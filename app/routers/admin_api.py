@@ -2,7 +2,8 @@
 API JSON cho Admin Dashboard (yêu cầu role admin).
 """
 
-from typing import Optional
+import io
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -336,6 +337,57 @@ async def admin_test_route_publish(request: Request):
             },
         )
     return JSONResponse(content={"success": True, "message": "Đã publish lên path topic."})
+
+
+@router.post("/test-route/journey-log/export")
+async def admin_test_route_journey_log_export(request: Request):
+    """Xuất log MQTT (robot status + topic UGV) trong một lần test thực địa ra file .xlsx."""
+    require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    rows: List[Any] = body.get("rows") or []
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=400, detail="Thiếu hoặc sai kiểu rows (mảng).")
+    if len(rows) > 50_000:
+        raise HTTPException(status_code=400, detail="Tối đa 50000 dòng mỗi file.")
+
+    from openpyxl import Workbook  # type: ignore
+    from openpyxl.styles import Font  # type: ignore
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "robot_status"
+    headers = ["timestamp_iso", "timestamp_local", "topic", "payload", "has_moving"]
+    ws.append(headers)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    max_cell = 32000
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        ts = str(r.get("t") or "")
+        loc = str(r.get("t_local") or "")
+        topic = str(r.get("topic") or "")
+        payload = str(r.get("payload") or "")
+        if len(payload) > max_cell:
+            payload = payload[:max_cell] + "…(truncated)"
+        hm = r.get("has_moving")
+        if hm is True or hm is False:
+            hm_s = "true" if hm else "false"
+        else:
+            hm_s = ""
+        ws.append([ts, loc, topic, payload, hm_s])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="test_field_robot_status_log.xlsx"',
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

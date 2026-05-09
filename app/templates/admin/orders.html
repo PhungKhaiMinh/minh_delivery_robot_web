@@ -349,7 +349,15 @@
     </div>
 </div>
 
-<div class="max-w-7xl mx-auto mt-8 space-y-3" x-data="fieldTestRoutePlanner()">
+{% set ftr_cfg = {
+    "wsUrl": mqtt_ws_url,
+    "clientPrefix": mqtt_client_prefix,
+    "mqttUser": mqtt_username,
+    "mqttPass": mqtt_password,
+    "topicRobotStatus": mqtt_topic_status,
+    "ugvTopics": robot_status_ugv_topics,
+} %}
+<div class="max-w-7xl mx-auto mt-8 space-y-3" x-data='fieldTestRoutePlanner({{ ftr_cfg|tojson }})'>
     <div>
         <h2 class="text-xl font-bold text-slate-900">Kịch bản test thực địa</h2>
         <p class="text-sm text-slate-500 mt-1">
@@ -398,6 +406,48 @@
         </p>
         <p class="text-xs text-red-600 min-h-[1rem]" x-show="planErr" x-text="planErr"></p>
         <p class="text-xs text-emerald-700 font-medium min-h-[1rem]" x-show="publishMsg" x-text="publishMsg"></p>
+
+        <div class="rounded-xl border border-slate-200 bg-slate-50/90 p-4 space-y-3"
+            x-show="journeyPhase !== 'off' || testRunLog.length > 0">
+            <p class="text-xs font-bold text-slate-800">
+                Theo dõi hành trình test — <span class="font-mono text-indigo-800" x-text="topicHasMovingLabel"></span>
+                + toàn bộ topic trạng thái UGV (gồm <span class="font-mono" x-text="topicRobotStatusLabel"></span>)
+            </p>
+            <p class="text-xs text-slate-700 leading-relaxed" x-show="journeySummary" x-text="journeySummary"></p>
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium"
+                    :class="{
+                        'bg-emerald-100 text-emerald-800': runMonitorConn === 'connected',
+                        'bg-amber-100 text-amber-800': runMonitorConn === 'reconnecting',
+                        'bg-slate-200 text-slate-600': runMonitorConn === 'disconnected',
+                        'bg-red-100 text-red-800': runMonitorConn === 'error',
+                    }">
+                    <span class="w-1.5 h-1.5 rounded-full" :class="runMonitorConn === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+                    <span x-text="runMonitorLabel"></span>
+                </span>
+                <span class="text-slate-600">has_moving:</span>
+                <span class="font-mono font-semibold text-slate-900"
+                    x-text="hasMovingLive === null || hasMovingLive === undefined ? '—' : (hasMovingLive ? 'true' : 'false')"></span>
+                <span class="text-slate-500">· <span x-text="testRunLog.length"></span> dòng log</span>
+            </div>
+            <p class="text-xs text-red-600 whitespace-pre-wrap" x-show="monitorErr" x-text="monitorErr"></p>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" @click="downloadJourneyLog()"
+                    :disabled="!testRunLog.length"
+                    class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-indigo-300 text-indigo-900 hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                    Tải log Excel (.xlsx)
+                </button>
+                <button type="button" @click="cancelJourneyMonitor()"
+                    x-show="journeyPhase === 'armed' || journeyPhase === 'moving'"
+                    class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-300 text-slate-800 hover:bg-slate-100">
+                    Hủy theo dõi
+                </button>
+            </div>
+            <p class="text-[10px] text-slate-500">Chỉ giữ log của lần nhấn <strong>Bắt đầu</strong> gần nhất; mỗi lần gửi path mới sẽ xóa log cũ.</p>
+            <pre class="text-[10px] font-mono bg-white border border-slate-200 rounded-lg p-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-slate-800"
+                x-text="logPreviewText"></pre>
+        </div>
+
         <div x-show="orderedStops.length" class="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
             <p class="text-xs font-semibold text-slate-700 mb-2">Thứ tự lộ trình (kiểm tra thuật toán)</p>
             <ol class="list-decimal list-inside space-y-1 text-sm text-slate-800">
@@ -1049,7 +1099,32 @@ window._doDeleteOrder = async function (id) {
 
     window.pickupLocationsEditor = pickupLocationsEditor;
 
-    function fieldTestRoutePlanner() {
+    function fieldTestRoutePlanner(cfg) {
+        cfg = cfg || {};
+        var wsUrl = cfg.wsUrl || '';
+        var clientPrefix = cfg.clientPrefix || '';
+        var mqttUser = cfg.mqttUser;
+        var mqttPass = cfg.mqttPass;
+        var topicRobotStatus = cfg.topicRobotStatus || 'robot/status';
+        var ugvTopics = (cfg.ugvTopics && typeof cfg.ugvTopics === 'object') ? cfg.ugvTopics : {};
+        var topicHasMoving = ugvTopics.has_moving || 'UGV/status/has_moving';
+        var subscribeTopics = [];
+        (function buildSubscribeList() {
+            var seen = {};
+            function add(t) {
+                if (!t || typeof t !== 'string') return;
+                if (seen[t]) return;
+                seen[t] = true;
+                subscribeTopics.push(t);
+            }
+            add(topicRobotStatus);
+            Object.keys(ugvTopics).forEach(function (k) {
+                add(ugvTopics[k]);
+            });
+        })();
+        var MAX_LOG = 20000;
+        var ARM_TIMEOUT_MS = 30 * 60 * 1000;
+
         return {
             pickupOptions: [],
             startId: '',
@@ -1062,6 +1137,44 @@ window._doDeleteOrder = async function (id) {
             totalLengthM: null,
             lastPayload: null,
 
+            topicHasMovingLabel: topicHasMoving,
+            topicRobotStatusLabel: topicRobotStatus,
+
+            journeyPhase: 'off',
+            runMonitorConn: 'disconnected',
+            runMonitorLabel: '—',
+            monitorErr: '',
+            hasMovingLive: null,
+            testRunLog: [],
+            _ftrMqtt: null,
+            _ftrMsgBound: null,
+            _armTimerId: null,
+            _monitorSessionId: 0,
+
+            get journeySummary() {
+                switch (this.journeyPhase) {
+                    case 'armed':
+                        return 'Đã gửi path lên MQTT — chờ has_moving = true (robot bắt đầu chạy).';
+                    case 'moving':
+                        return 'Robot đang di chuyển — chờ has_moving = false (dừng, kết thúc hành trình).';
+                    case 'complete':
+                        return 'Hành trình kết thúc. Có thể tải file Excel (.xlsx) chứa log gần nhất.';
+                    case 'cancelled':
+                        return 'Đã hủy theo dõi hoặc hết thời gian chờ (30 phút) mà chưa thấy robot chuyển sang di chuyển.';
+                    default:
+                        return '';
+                }
+            },
+
+            get logPreviewText() {
+                var rows = this.testRunLog.slice(-20);
+                return rows.map(function (r) {
+                    var p = String(r.payload != null ? r.payload : '');
+                    if (p.length > 140) p = p.slice(0, 140) + '…';
+                    return (r.t_local || '') + ' | ' + (r.topic || '') + ' | ' + p;
+                }).join('\n');
+            },
+
             reloadPickups() {
                 var list = readPickupLocationsBoot();
                 this.pickupOptions = (Array.isArray(list) ? list : []).map(function (loc) {
@@ -1069,11 +1182,156 @@ window._doDeleteOrder = async function (id) {
                 });
             },
 
+            _clearArmTimer() {
+                if (this._armTimerId) {
+                    clearTimeout(this._armTimerId);
+                    this._armTimerId = null;
+                }
+            },
+
+            _inferHasMoving(topic, rawStr) {
+                if (topic === topicHasMoving) {
+                    var o = window.AdminMqtt.safeParseJson(rawStr);
+                    if (o && typeof o === 'object' && o.has_moving !== undefined) return !!o.has_moving;
+                }
+                if (topic === topicRobotStatus) {
+                    var o2 = window.AdminMqtt.safeParseJson(rawStr);
+                    if (o2 && typeof o2 === 'object' && o2.has_moving !== undefined) return !!o2.has_moving;
+                }
+                return null;
+            },
+
+            _pushLog(topic, rawStr, hmInf) {
+                if (this.testRunLog.length >= MAX_LOG) return;
+                var now = new Date();
+                this.testRunLog.push({
+                    t: now.toISOString(),
+                    t_local: now.toLocaleString('vi-VN'),
+                    topic: topic,
+                    payload: rawStr,
+                    has_moving: hmInf === null || hmInf === undefined ? null : hmInf,
+                });
+            },
+
+            _applyHasMovingState(hm) {
+                if (hm === null || hm === undefined) return;
+                this.hasMovingLive = hm;
+                if (this.journeyPhase === 'armed' && hm === true) {
+                    this.journeyPhase = 'moving';
+                    this._clearArmTimer();
+                } else if (this.journeyPhase === 'moving' && hm === false) {
+                    this.journeyPhase = 'complete';
+                    this._finishRecording();
+                }
+            },
+
+            _finishRecording() {
+                this._clearArmTimer();
+                this._monitorSessionId++;
+                this._ftrMqtt = null;
+                this._ftrMsgBound = null;
+            },
+
+            _beginJourneyMonitor() {
+                var self = this;
+                this._finishRecording();
+                var sid = this._monitorSessionId;
+                this.testRunLog = [];
+                this.hasMovingLive = null;
+                this.journeyPhase = 'armed';
+                this.monitorErr = '';
+                this.runMonitorConn = 'disconnected';
+                this.runMonitorLabel = 'Đang kết nối MQTT…';
+
+                this._ftrMsgBound = function (t, msg) {
+                    if (sid !== self._monitorSessionId) return;
+                    var ph = self.journeyPhase;
+                    if (ph !== 'armed' && ph !== 'moving') return;
+                    var raw = msg.toString();
+                    var hm = self._inferHasMoving(t, raw);
+                    self._pushLog(t, raw, hm);
+                    self._applyHasMovingState(hm);
+                };
+
+                this._ftrMqtt = window.AdminMqtt.connect(wsUrl, clientPrefix, function (state, detail) {
+                    self.runMonitorConn = state;
+                    self.monitorErr = detail || '';
+                    var labels = {
+                        connected: 'MQTT OK',
+                        disconnected: 'Mất kết nối',
+                        reconnecting: 'Đang nối lại…',
+                        error: 'Lỗi',
+                    };
+                    self.runMonitorLabel = labels[state] || state;
+                    if (state === 'connected' && self._ftrMqtt) {
+                        subscribeTopics.forEach(function (top) {
+                            try {
+                                self._ftrMqtt.subscribe(top, { qos: 0 });
+                            } catch (e) { /* ignore */ }
+                        });
+                    }
+                }, {
+                    username: mqttUser || undefined,
+                    password: mqttPass !== undefined && mqttPass !== null && String(mqttPass) !== ''
+                        ? String(mqttPass) : undefined,
+                });
+
+                if (this._ftrMqtt) {
+                    this._ftrMqtt.on('message', this._ftrMsgBound);
+                } else {
+                    this.monitorErr = 'Không tạo được client MQTT — không ghi được log.';
+                    this.journeyPhase = 'cancelled';
+                    return;
+                }
+
+                this._armTimerId = setTimeout(function () {
+                    if (self.journeyPhase !== 'armed') return;
+                    self.monitorErr = (self.monitorErr ? self.monitorErr + '\n' : '')
+                        + 'Hết 30 phút chờ has_moving=true — đã dừng theo dõi tự động.';
+                    self.journeyPhase = 'cancelled';
+                    self._finishRecording();
+                }, ARM_TIMEOUT_MS);
+            },
+
+            cancelJourneyMonitor() {
+                if (this.journeyPhase !== 'armed' && this.journeyPhase !== 'moving') return;
+                this.journeyPhase = 'cancelled';
+                this._finishRecording();
+            },
+
+            async downloadJourneyLog() {
+                if (!this.testRunLog.length) return;
+                try {
+                    var res = await fetch('/api/admin/test-route/journey-log/export', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rows: this.testRunLog }),
+                    });
+                    if (!res.ok) {
+                        var errt = await res.text();
+                        window.alert('Xuất file thất bại: ' + (errt || res.status));
+                        return;
+                    }
+                    var blob = await res.blob();
+                    var a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'test_field_robot_status_log.xlsx';
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                } catch (e) {
+                    window.alert('Lỗi: ' + (e && e.message ? e.message : String(e)));
+                }
+            },
+
             init() {
                 var self = this;
                 this.reloadPickups();
                 window.addEventListener('admin-pickup-locations-updated', function () {
                     self.reloadPickups();
+                });
+                window.addEventListener('pagehide', function () {
+                    self._finishRecording();
                 });
             },
 
@@ -1134,6 +1392,7 @@ window._doDeleteOrder = async function (id) {
                         return;
                     }
                     this.publishMsg = data.message || 'Đã gửi MQTT.';
+                    this._beginJourneyMonitor();
                     var self = this;
                     setTimeout(function () { self.publishMsg = ''; }, 4000);
                 } catch (e) {
