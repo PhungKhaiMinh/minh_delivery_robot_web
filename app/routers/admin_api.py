@@ -2,6 +2,8 @@
 API JSON cho Admin Dashboard (yêu cầu role admin).
 """
 
+import gzip
+import json
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -339,14 +341,33 @@ async def admin_test_route_publish(request: Request):
     return JSONResponse(content={"success": True, "message": "Đã publish lên path topic."})
 
 
+def _decode_journey_export_body(raw: bytes) -> dict:
+    """Parse JSON body; hỗ trợ gzip nếu body bắt đầu bằng magic 0x1f 0x8b (vượt giới hạn proxy khi log lớn)."""
+    if not raw:
+        return {}
+    data = raw
+    if data[:2] == b"\x1f\x8b":
+        try:
+            data = gzip.decompress(data)
+        except OSError as e:
+            raise HTTPException(status_code=400, detail=f"Không giải nén được gzip: {e}") from e
+    try:
+        return json.loads(data.decode("utf-8"))
+    except UnicodeDecodeError as e:
+        raise HTTPException(status_code=400, detail="Body không phải UTF-8 hợp lệ.") from e
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"JSON không hợp lệ: {e}") from e
+
+
 @router.post("/test-route/journey-log/export")
 async def admin_test_route_journey_log_export(request: Request):
     """Xuất log MQTT ra .xlsx dạng snapshot: mỗi dòng = một sự kiện, các cột là thông số mới nhất (carry-forward)."""
     require_admin(request)
+    raw = await request.body()
     try:
-        body = await request.json()
-    except Exception:
-        body = {}
+        body = _decode_journey_export_body(raw)
+    except HTTPException:
+        raise
     rows: List[Any] = body.get("rows") or []
     if not isinstance(rows, list):
         raise HTTPException(status_code=400, detail="Thiếu hoặc sai kiểu rows (mảng).")

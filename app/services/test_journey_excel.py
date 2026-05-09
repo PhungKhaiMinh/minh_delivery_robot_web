@@ -1,22 +1,16 @@
 """
 Xuất log hành trình test MQTT ra Excel dạng **wide / snapshot**:
-- Gộp theo bucket **100 ms (10 Hz)** theo `timestamp_iso`: mọi bản tin trong cùng 100 ms
-  được merge theo thứ tự, **một dòng Excel** cho snapshot cuối bucket.
-- Mỗi dòng: thời điểm + `topic` (bản tin cuối trong bucket) + các cột thông số (carry-forward).
+mỗi bản tin log = một dòng (theo đúng tốc độ ghi nhận), các cột là giá trị mới nhất
+(carry-forward) sau khi áp dụng bản tin đó.
 """
 
 from __future__ import annotations
 
 import io
 import json
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import MQTT_TOPIC_STATUS, ROBOT_STATUS_UGV_TOPICS
-
-# Xuất Excel tối đa 10 hàng/giây: gộp mọi bản tin trong cùng bucket 100 ms,
-# merge state theo thứ tự thời gian, mỗi bucket một dòng.
-_SAMPLE_BUCKET_MS = 100
 
 
 def _topic_to_message_key() -> Dict[str, str]:
@@ -229,21 +223,6 @@ def _sort_key(row: dict) -> str:
     return str(row.get("t") or "")
 
 
-def _row_time_ms(row: dict) -> int:
-    s = str(row.get("t") or "").strip()
-    if not s:
-        return 0
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    try:
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return int(dt.timestamp() * 1000)
-    except (ValueError, TypeError, OSError):
-        return 0
-
-
 def _ingest_log_row(state: Dict[str, Any], r: dict, topic_map: Dict[str, str]) -> None:
     topic = str(r.get("topic") or "")
     payload = str(r.get("payload") or "")
@@ -331,20 +310,12 @@ def build_test_journey_xlsx_bytes(rows: List[Any], max_input_rows: int = 50_000)
     for c in ws[1]:
         c.font = Font(bold=True)
 
-    prev_bid: Optional[int] = None
-    emit_ts, emit_loc, emit_topic = "", "", ""
-
     for r in sorted_rows:
-        bid = _row_time_ms(r) // _SAMPLE_BUCKET_MS
-        if prev_bid is not None and bid != prev_bid:
-            _append_snapshot_row(ws, state, emit_ts, emit_loc, emit_topic, _DATA_COLS)
         _ingest_log_row(state, r, topic_map)
-        emit_ts = str(r.get("t") or "")
-        emit_loc = str(r.get("t_local") or "")
-        emit_topic = str(r.get("topic") or "")
-        prev_bid = bid
-    if prev_bid is not None:
-        _append_snapshot_row(ws, state, emit_ts, emit_loc, emit_topic, _DATA_COLS)
+        ts = str(r.get("t") or "")
+        loc = str(r.get("t_local") or "")
+        topic = str(r.get("topic") or "")
+        _append_snapshot_row(ws, state, ts, loc, topic, _DATA_COLS)
 
     buf = io.BytesIO()
     wb.save(buf)

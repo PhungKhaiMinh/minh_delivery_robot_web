@@ -433,9 +433,10 @@
             <p class="text-xs text-red-600 whitespace-pre-wrap" x-show="monitorErr" x-text="monitorErr"></p>
             <div class="flex flex-wrap gap-2">
                 <button type="button" @click="downloadJourneyLog()"
-                    :disabled="!testRunLog.length"
+                    :disabled="!testRunLog.length || journeyLogExporting"
                     class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-indigo-300 text-indigo-900 hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed">
-                    Tải log Excel (.xlsx)
+                    <span x-show="!journeyLogExporting">Tải log Excel (.xlsx)</span>
+                    <span x-show="journeyLogExporting">Đang xuất…</span>
                 </button>
                 <button type="button" @click="cancelJourneyMonitor()"
                     x-show="journeyPhase === 'armed' || journeyPhase === 'moving'"
@@ -1146,6 +1147,7 @@ window._doDeleteOrder = async function (id) {
             monitorErr: '',
             hasMovingLive: null,
             testRunLog: [],
+            journeyLogExporting: false,
             _ftrMqtt: null,
             _ftrMsgBound: null,
             _armTimerId: null,
@@ -1300,17 +1302,52 @@ window._doDeleteOrder = async function (id) {
             },
 
             async downloadJourneyLog() {
-                if (!this.testRunLog.length) return;
+                if (!this.testRunLog.length || this.journeyLogExporting) return;
+                this.journeyLogExporting = true;
+                var controller = new AbortController();
+                var timeoutMs = 180000;
+                var timeoutId = setTimeout(function () {
+                    controller.abort();
+                }, timeoutMs);
                 try {
+                    var payload = { rows: this.testRunLog };
+                    var jsonStr = JSON.stringify(payload);
+                    var headers = { 'Content-Type': 'application/json' };
+                    var body = jsonStr;
+                    var useGzip = typeof CompressionStream !== 'undefined'
+                        && (jsonStr.length >= 65536 || this.testRunLog.length >= 400);
+                    if (useGzip) {
+                        try {
+                            var enc = new TextEncoder().encode(jsonStr);
+                            var stream = new Blob([enc]).stream().pipeThrough(new CompressionStream('gzip'));
+                            var ab = await new Response(stream).arrayBuffer();
+                            if (ab && ab.byteLength > 0 && ab.byteLength < jsonStr.length) {
+                                body = ab;
+                                headers['Content-Encoding'] = 'gzip';
+                            }
+                        } catch (gzErr) { /* gửi JSON thường */ }
+                    }
                     var res = await fetch('/api/admin/test-route/journey-log/export', {
                         method: 'POST',
                         credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ rows: this.testRunLog }),
+                        headers: headers,
+                        body: body,
+                        signal: controller.signal,
                     });
+                    clearTimeout(timeoutId);
                     if (!res.ok) {
                         var errt = await res.text();
-                        window.alert('Xuất file thất bại: ' + (errt || res.status));
+                        var hint = '';
+                        if (res.status === 413) {
+                            hint = '\n\nPayload quá lớn (HTTP 413). Nếu đã cập nhật web: thử trình duyệt có nén gzip (Chrome/Edge), hoặc tăng client_max_body_size trên nginx.';
+                        }
+                        window.alert('Xuất file thất bại (' + res.status + '): ' + (errt || '').slice(0, 500) + hint);
+                        return;
+                    }
+                    var ct = (res.headers.get('content-type') || '').toLowerCase();
+                    if (ct.indexOf('spreadsheet') < 0 && ct.indexOf('octet-stream') < 0 && ct.indexOf('excel') < 0) {
+                        var txt = await res.text();
+                        window.alert('Phản hồi không phải file Excel.\n' + txt.slice(0, 400));
                         return;
                     }
                     var blob = await res.blob();
@@ -1320,7 +1357,16 @@ window._doDeleteOrder = async function (id) {
                     a.click();
                     URL.revokeObjectURL(a.href);
                 } catch (e) {
-                    window.alert('Lỗi: ' + (e && e.message ? e.message : String(e)));
+                    clearTimeout(timeoutId);
+                    var msg = (e && e.name === 'AbortError')
+                        ? ('Hết thời gian chờ (' + (timeoutMs / 60000) + ' phút).')
+                        : (e && e.message ? e.message : String(e));
+                    if (String(msg).indexOf('Failed to fetch') >= 0 || String(msg).indexOf('NetworkError') >= 0) {
+                        msg += '\n\nThường do request quá lớn bị reverse-proxy chặn hoặc mất kết nối. Thử Chrome/Edge (bản mới hỗ trợ nén gzip khi gửi), hoặc cấu hình nginx client_max_body_size.';
+                    }
+                    window.alert('Lỗi: ' + msg);
+                } finally {
+                    this.journeyLogExporting = false;
                 }
             },
 
