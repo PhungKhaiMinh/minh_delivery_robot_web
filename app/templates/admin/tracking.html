@@ -28,15 +28,12 @@
     "occImageBase": "/api/admin/occ-grid/image.png",
     "occMapPath": occ_grid_map_path,
 } %}
-<div class="max-w-7xl mx-auto space-y-6" x-data="adminTracking(Object.assign({{ tracking_cfg|tojson }}, { occMapId: (function(){ try { return localStorage.getItem('admin_tracking_occ_map_id')||''; } catch(e){ return ''; } })() }))" x-init="init()">
+<div class="max-w-7xl mx-auto space-y-6" x-data='adminTracking(Object.assign({{ tracking_cfg|tojson }}, { occMapId: (function () { try { return localStorage.getItem("admin_tracking_occ_map_id") || ""; } catch (e) { return ""; } })() }))' x-init="init()">
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Tracking</h1>
         <p class="text-sm text-slate-500 mt-1">
-            <strong>Tiếng Việt:</strong> Bản đồ occupancy <code class="text-xs bg-slate-200 px-1 rounded">.pgm</code> (PNG + Leaflet, mét). Chọn map từ thư viện nếu đã tải tại
-            <a href="/admin/settings" class="text-sky-700 font-medium hover:underline">Settings</a>; mặc định = map <em>active</em> hoặc file <code class="text-xs font-mono" x-text="occMapPathLabel"></code>.
-            <strong>English:</strong> Pick a library map from the dropdown (if any); otherwise the server default (active library map or <code class="text-xs font-mono">OCC_GRID_MAP_PATH</code>) is used.
-            Optional <code class="text-xs bg-slate-200 px-1 rounded">map.yaml</code> (ROS <code class="text-xs">resolution</code> + <code class="text-xs">origin</code>) on upload.
-            Pose MQTT <code class="text-xs bg-slate-200 px-1 rounded" x-text="topicPoseLabel"></code> — pan / zoom as needed.
+            <strong>Tiếng Việt:</strong> Bản đồ từ server (PGM → PNG, mét). Mở <a href="/admin/settings" class="text-sky-700 font-medium hover:underline">Settings → Bản đồ Tracking</a> để tải map; mặc định dùng map <em>active</em> trong thư viện (hoặc file env nếu bỏ active).
+            <strong>English:</strong> Upload maps in Settings; Tracking uses the library <em>active</em> map unless you pick another in the list below.
         </p>
     </div>
 
@@ -60,11 +57,12 @@
             Xóa quỹ đạo
         </button>
         <span class="text-xs text-red-600" x-show="errDetail" x-text="errDetail"></span>
-        <label class="flex flex-wrap items-center gap-2 text-xs text-slate-600" x-show="occMapsList.length > 0">
-            <span class="font-medium text-slate-700">Map</span>
-            <select class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white max-w-[min(18rem,85vw)]"
+        <label class="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            <span class="font-medium text-slate-700 shrink-0">Map hiển thị</span>
+            <select class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white max-w-[min(20rem,90vw)] disabled:opacity-60"
+                :disabled="occMapsListing"
                 x-model="occMapSelect" @change="onOccMapSelectChange()">
-                <option value="">Mặc định (active / OCC_GRID_MAP_PATH)</option>
+                <option value="" x-text="occMapsListing ? 'Đang tải danh sách…' : 'Mặc định (active / env)'"></option>
                 <template x-for="m in occMapsList" :key="m.id">
                     <option :value="m.id" x-text="m.label + ' · ' + m.id.slice(0, 10) + '…'"></option>
                 </template>
@@ -124,6 +122,9 @@
 
     <div class="relative bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden map-stack">
         <div id="admin-map" class="w-full"></div>
+        <div x-show="mapBootLoading" class="absolute inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 pointer-events-none">
+            <span class="px-4 py-2 rounded-lg bg-white text-sm text-slate-700 shadow">Đang tải bản đồ… / Loading map…</span>
+        </div>
         <div x-show="conn !== 'connected' && mapReady"
             class="absolute bottom-3 left-3 right-3 pointer-events-none flex justify-center">
             <span class="px-3 py-1.5 rounded-lg bg-white/90 border border-slate-200 text-xs text-slate-600 shadow-sm">
@@ -327,6 +328,7 @@
             graphErr: '',
             graphMeta: '',
             mapReady: false,
+            mapBootLoading: true,
             poseX: null,
             poseY: null,
             poseYaw: null,
@@ -349,6 +351,7 @@
             avoidJsonPretty: '',
             occMapsList: [],
             occMapSelect: occMapIdSel,
+            occMapsListing: true,
 
             onOccMapSelectChange: function () {
                 try {
@@ -356,6 +359,8 @@
                 } catch (e) { /* ignore */ }
                 window.location.reload();
             },
+
+            init: function () {
                 var self = this;
                 if (self._trackingInitOnce) {
                     return;
@@ -393,6 +398,7 @@
                             }
                         }
                     } catch (e3) { /* ignore */ }
+                    self.occMapsListing = false;
 
                     var b = null;
                     var installTrackingMqtt = function () {
@@ -663,6 +669,7 @@
                     await self._loadWaypointGraphOverlay();
                     installTrackingMqtt();
                 } finally {
+                    self.mapBootLoading = false;
                     self._bootLock = false;
                 }
             },

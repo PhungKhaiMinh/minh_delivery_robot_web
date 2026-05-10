@@ -37,59 +37,36 @@
     </div>
     <p class="text-xs text-red-600 min-h-[1rem]" x-show="publishError" x-text="publishError"></p>
 
-    <!-- Bản đồ PGM (Admin Tracking) -->
+    <!-- Bản đồ Tracking: một luồng rõ ràng (thư viện) + nâng cao (ghi đè env) -->
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-4">
         <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-            Bản đồ occupancy PGM (Admin Tracking)
+            <span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span>
+            Bản đồ Tracking (PGM + YAML)
         </p>
-        <p class="text-xs text-slate-500">
-            <strong>Tiếng Việt:</strong> Có hai cách: (1) <em>Ghi đè file đích</em> — tải PGM/YAML lên đúng đường dẫn <code class="font-mono">OCC_GRID_MAP_PATH</code> (Railway/volume).
-            (2) <em>Thư viện</em> — thêm nhiều bộ PGM+YAML; trang Tracking chọn map theo id (hoặc mặc định theo map <em>active</em> trong thư viện, nếu không có thì dùng env).
-            <strong>English:</strong> Either overwrite the single <code class="font-mono">OCC_GRID_MAP_PATH</code> file, or add maps to the on-disk library and pick one on Tracking.
-            ROS <code class="font-mono">map.yaml</code> (<code class="text-xs">resolution</code>, <code class="text-xs">origin</code>) is optional; otherwise use
-            <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_RESOLUTION</code>, <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_ORIGIN_X</code>, <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_ORIGIN_Y</code>.
-        </p>
-        <dl class="text-xs space-y-1 font-mono text-slate-700 bg-slate-50 rounded-xl p-3 border border-slate-100">
-            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Đường dẫn server</dt><dd class="break-all" x-text="occPath || occGridMapPath"></dd></div>
-            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Có file</dt><dd><span x-text="occExists ? 'Có' : 'Chưa'"></span> · <span x-text="occBytesLabel"></span> · <span x-text="occWHLabel"></span> · res: <span x-text="occResLabel"></span> · YAML: <span x-text="occYamlLabel"></span></dd></div>
-        </dl>
-        <p class="text-xs font-semibold text-slate-700">Ghi đè <code class="font-mono">OCC_GRID_MAP_PATH</code></p>
-        <div class="flex flex-wrap items-end gap-3">
-            <label class="block min-w-[12rem] flex-1">
-                <span class="text-xs font-medium text-slate-600">Chọn PGM (.pgm)</span>
-                <input type="file" accept=".pgm,.pnm,image/x-portable-graymap,application/octet-stream" x-ref="occPgmFile"
-                    class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-100 file:text-emerald-800 hover:file:bg-emerald-200" />
-            </label>
-            <label class="block min-w-[10rem] flex-1">
-                <span class="text-xs font-medium text-slate-600">map.yaml (tùy chọn)</span>
-                <input type="file" accept=".yaml,.yml,text/yaml,application/x-yaml,.yaml,.yml" x-ref="occYamlFile"
-                    class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200" />
-            </label>
-            <button type="button" @click="uploadOccGridMap()"
-                :disabled="occUploading"
-                class="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 shrink-0">
-                <span x-show="!occUploading">Tải lên &amp; lưu</span>
-                <span x-show="occUploading">Đang tải…</span>
-            </button>
-            <button type="button" @click="refreshOccGridStatus(); refreshOccMaps()" class="px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 shrink-0">
-                Làm mới trạng thái
-            </button>
-        </div>
-        <p class="text-xs text-emerald-700 font-medium min-h-[1rem]" x-show="occMsg" x-text="occMsg"></p>
-        <p class="text-xs text-red-600 min-h-[1rem]" x-show="occErr" x-text="occErr"></p>
 
-        <div class="border-t border-slate-200 pt-4 mt-4 space-y-3">
-            <p class="text-xs font-semibold text-slate-700">Thư viện map (nhiều PGM + YAML) / Map library</p>
-            <p class="text-xs text-slate-500">Map vừa thêm được đặt <em>active</em> tự động. Tracking: chọn map trong dropdown (hoặc để mặc định = active / env).</p>
+        <div class="rounded-xl border border-violet-200 bg-violet-50/90 p-4 space-y-2">
+            <p class="text-sm font-semibold text-violet-950">Bước 1 — Tải map vào thư viện / Step 1 — Upload to library</p>
+            <p class="text-xs text-violet-900/90 leading-relaxed">
+                <strong>Khuyến nghị / Recommended:</strong> chỉ cần làm ở đây. Chọn <code class="text-[11px] bg-white/80 px-1 rounded">.pgm</code> và (nếu có) <code class="text-[11px] bg-white/80 px-1 rounded">map.yaml</code> ROS, nhấn <strong>Thêm vào thư viện</strong>.
+                Map mới sẽ thành <em>active</em> tự động — mở trang <strong>Tracking</strong> là thấy bản đồ (hoặc chọn map khác trong dropdown Tracking).
+            </p>
+        </div>
+
+        <dl class="text-xs space-y-1 font-mono text-slate-700 bg-slate-50 rounded-xl p-3 border border-slate-100">
+            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">PGM đang dùng (meta)</dt><dd class="break-all" x-text="occPath || occGridMapPath"></dd></div>
+            <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Trạng thái</dt><dd><span x-text="occExists ? 'Có file' : 'Chưa có'"></span> · <span x-text="occBytesLabel"></span> · <span x-text="occWHLabel"></span> · res: <span x-text="occResLabel"></span> · YAML: <span x-text="occYamlLabel"></span></dd></div>
+        </dl>
+
+        <div class="space-y-3">
+            <p class="text-xs font-semibold text-slate-800">Thư viện map / Map library</p>
             <div class="flex flex-wrap gap-2">
-                <button type="button" @click="refreshOccMaps()" class="px-3 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg hover:bg-slate-50">Làm mới danh sách</button>
+                <button type="button" @click="refreshOccMaps(); refreshOccGridStatus()" class="px-3 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg hover:bg-slate-50">Làm mới</button>
                 <button type="button" @click="clearOccLibraryActive()" :disabled="occLibBusy"
                     class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-100 text-slate-800 hover:bg-slate-200 disabled:opacity-50">
-                    Bỏ active thư viện (dùng OCC_GRID_MAP_PATH)
+                    Chỉ dùng file env (bỏ active thư viện) / Use env file only
                 </button>
             </div>
-            <p class="text-xs text-slate-500" x-show="occActiveId">Active hiện tại: <code class="bg-slate-100 px-1 rounded" x-text="occActiveId"></code></p>
+            <p class="text-xs text-slate-600" x-show="occActiveId"><span class="text-slate-500">Active:</span> <code class="bg-slate-100 px-1 rounded" x-text="occActiveId"></code></p>
             <div class="rounded-lg border border-slate-200 divide-y divide-slate-100 max-h-56 overflow-y-auto bg-white" x-show="occMaps.length">
                 <template x-for="m in occMaps" :key="m.id">
                     <div class="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
@@ -105,32 +82,64 @@
                     </div>
                 </template>
             </div>
-            <p class="text-xs text-slate-400" x-show="!occMaps.length">Chưa có map trong thư viện. / No maps in library yet.</p>
+            <p class="text-xs text-slate-400" x-show="!occMaps.length">Chưa có map trong thư viện — dùng form bên dưới để thêm. / Library is empty — upload below.</p>
             <p class="text-xs text-emerald-700 min-h-[1rem]" x-show="occLibMsg" x-text="occLibMsg"></p>
             <p class="text-xs text-red-600 min-h-[1rem]" x-show="occLibErr" x-text="occLibErr"></p>
-            <div class="flex flex-wrap items-end gap-3">
+            <div class="flex flex-wrap items-end gap-3 pt-1">
                 <label class="block min-w-[8rem]">
                     <span class="text-xs font-medium text-slate-600">Nhãn / Label</span>
-                    <input type="text" x-model="occNewLibLabel" placeholder="Campus A"
+                    <input type="text" x-model="occNewLibLabel" placeholder="Ví dụ: HanhLang B2"
                         class="mt-1 block w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5" />
                 </label>
                 <label class="block min-w-[10rem] flex-1">
-                    <span class="text-xs font-medium text-slate-600">PGM</span>
+                    <span class="text-xs font-medium text-slate-600">PGM (bắt buộc)</span>
                     <input type="file" accept=".pgm,.pnm,image/x-portable-graymap,application/octet-stream" x-ref="occLibPgmFile"
                         class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-violet-100 file:text-violet-900" />
                 </label>
                 <label class="block min-w-[8rem] flex-1">
-                    <span class="text-xs font-medium text-slate-600">YAML</span>
+                    <span class="text-xs font-medium text-slate-600">map.yaml (khuyến nghị)</span>
                     <input type="file" accept=".yaml,.yml,text/yaml,application/x-yaml" x-ref="occLibYamlFile"
                         class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-slate-100 file:text-slate-700" />
                 </label>
                 <button type="button" @click="uploadOccToLibrary()" :disabled="occLibUploading || occLibBusy"
-                    class="px-3 py-2 rounded-xl text-xs font-semibold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 shrink-0">
+                    class="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 shrink-0">
                     <span x-show="!occLibUploading">Thêm vào thư viện</span>
                     <span x-show="occLibUploading">Đang tải…</span>
                 </button>
             </div>
         </div>
+
+        <details class="rounded-xl border border-slate-200 bg-slate-50/80 open:bg-white open:shadow-sm">
+            <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">
+                Nâng cao: ghi đè biến môi trường <code class="text-xs font-mono font-normal text-slate-600">OCC_GRID_MAP_PATH</code> (tùy chọn / optional)
+            </summary>
+            <div class="px-4 pb-4 pt-0 space-y-3 border-t border-slate-100">
+                <p class="text-xs text-slate-600 leading-relaxed">
+                    Dùng khi deploy một file map cố định trên volume (Docker/Railway). Thao tác này <strong>ghi đè</strong> đúng một file đích — <em>khác</em> thư viện ở trên. Thường bạn <strong>không cần</strong> mở mục này nếu đã dùng thư viện.
+                    <span class="block mt-1 text-slate-500">English: overwrites the single env path; use only if you rely on <code class="font-mono">OCC_GRID_MAP_PATH</code> on disk.</span>
+                </p>
+                <div class="flex flex-wrap items-end gap-3">
+                    <label class="block min-w-[12rem] flex-1">
+                        <span class="text-xs font-medium text-slate-600">PGM</span>
+                        <input type="file" accept=".pgm,.pnm,image/x-portable-graymap,application/octet-stream" x-ref="occPgmFile"
+                            class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-100 file:text-emerald-800 hover:file:bg-emerald-200" />
+                    </label>
+                    <label class="block min-w-[10rem] flex-1">
+                        <span class="text-xs font-medium text-slate-600">map.yaml</span>
+                        <input type="file" accept=".yaml,.yml,text/yaml,application/x-yaml,.yaml,.yml" x-ref="occYamlFile"
+                            class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200" />
+                    </label>
+                    <button type="button" @click="uploadOccGridMap()"
+                        :disabled="occUploading"
+                        class="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 shrink-0">
+                        <span x-show="!occUploading">Ghi đè file env</span>
+                        <span x-show="occUploading">Đang tải…</span>
+                    </button>
+                </div>
+                <p class="text-xs text-emerald-700 font-medium min-h-[1rem]" x-show="occMsg" x-text="occMsg"></p>
+                <p class="text-xs text-red-600 min-h-[1rem]" x-show="occErr" x-text="occErr"></p>
+            </div>
+        </details>
     </div>
 
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-6">
