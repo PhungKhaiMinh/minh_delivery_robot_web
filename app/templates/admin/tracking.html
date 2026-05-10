@@ -79,7 +79,7 @@
             Nhấn lại cùng một điểm để hủy bước chọn. <kbd class="px-1 bg-white rounded border text-[10px]">Esc</kbd> xóa lựa chọn.
         </p>
         <p class="text-xs text-violet-700/90 font-medium">
-            Điểm tím (waypoint) và cam (pickup) dùng cùng phép chiếu world → map với pose MQTT (lật Y giống layer trước đây).
+            Điểm tím (waypoint) và cam (pickup) dùng cùng phép chiếu world → map (mét, trùng pose MQTT và bounds PGM/map.yaml).
         </p>
         <p class="text-xs font-medium" :class="graphEditMode ? 'text-amber-800' : 'text-slate-500'" x-text="graphHint"></p>
         <div class="flex flex-wrap gap-2">
@@ -137,7 +137,7 @@
         <pre class="text-[11px] font-mono bg-white/90 border border-amber-100 rounded-lg p-3 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap" x-text="avoidJsonPretty || '— (chưa nhận payload)'"></pre>
     </div>
 
-    <p class="text-xs text-slate-400">Pose: <code>{"x":0.0,"y":0.0,"yaw":0.0}</code> — cùng hệ mét với map; vị trí / hướng vẽ dùng lật Y + chỉnh yaw hiển thị (giữ tương thích waypoint cũ).</p>
+    <p class="text-xs text-slate-400">Pose: <code>{"x":0.0,"y":0.0,"yaw":0.0}</code> — cùng hệ mét với map; yaw ROS (rad, CCW từ +X) được quy đổi sang hướng vẽ trên map (đông = +X, bắc = +Y).</p>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -180,21 +180,14 @@
         return L.latLng(b.ymax - wy, wx - b.xmin);
     }
 
-    function graphDisplayWorldY(wy, bb) {
-        return bb.ymin + bb.ymax - wy;
+    /** Đảo ngược worldToMapLatLng — cùng hệ mét với bounds PGM / map.yaml (ROS). */
+    function mapLatLngToWorld(ll, b) {
+        return [ll.lng + b.xmin, b.ymax - ll.lat];
     }
 
     function haversineMeters(a, b) {
         var dx = a[0] - b[0], dy = a[1] - b[1];
         return Math.sqrt(dx * dx + dy * dy);
-    }
-
-    function mapGraphAlignedLatLngToWorld(ll, bb) {
-        return [ll.lng + bb.xmin, ll.lat + bb.ymin];
-    }
-
-    function rtabGraphAlignWorldToMapLL(wx, wy, bb) {
-        return worldToMapLatLng(wx, graphDisplayWorldY(wy, bb), bb);
     }
 
     function normalizeWpEdge(x) {
@@ -237,7 +230,7 @@
 
         function poseToMapLL(nx, ny) {
             if (!graphBounds) return null;
-            return rtabGraphAlignWorldToMapLL(nx, ny, graphBounds);
+            return worldToMapLatLng(nx, ny, graphBounds);
         }
 
         return {
@@ -397,7 +390,8 @@
                                 self.poseY = ny.toFixed(4);
                                 self.poseYaw = yw != null ? yw.toFixed(4) : '—';
 
-                                var deg = yw != null ? (-(yw * 180 / Math.PI)) : null;
+                                // ROS yaw: quay CCW quanh +X; map: +X phải, +Y lên. Icon mặc định 0° = hướng lên (+Y) → cần 90° - yaw (độ).
+                                var deg = yw != null ? (90 - (yw * 180 / Math.PI)) : null;
                                 currentHeadingDeg = deg;
                                 updateRobotIcon();
 
@@ -411,9 +405,9 @@
                                 if (!ll || !trailLine) return;
 
                                 var dominated = false;
-                                if (trailCoords.length > 0 && b) {
+                                if (trailCoords.length > 0 && graphBounds) {
                                     var prev = trailCoords[trailCoords.length - 1];
-                                    var pw = mapGraphAlignedLatLngToWorld(prev, b);
+                                    var pw = mapLatLngToWorld(prev, graphBounds);
                                     var d = haversineMeters(pw, [nx, ny]);
                                     if (d < MIN_TRAIL_DIST) dominated = true;
                                 }
@@ -486,7 +480,7 @@
 
                     var cx = (bb.xmin + bb.xmax) / 2;
                     var cy = (bb.ymin + bb.ymax) / 2;
-                    var startLL = rtabGraphAlignWorldToMapLL(cx, cy, bb);
+                    var startLL = worldToMapLatLng(cx, cy, bb);
                     robotMarker = L.marker(startLL, {
                         icon: L.divIcon({
                             className: '',
@@ -727,7 +721,7 @@
                     wpById[wid] = w;
                     var c = w.center;
                     if (!c || c.x == null || c.y == null) return;
-                    var ll = rtabGraphAlignWorldToMapLL(Number(c.x), Number(c.y), b);
+                    var ll = worldToMapLatLng(Number(c.x), Number(c.y), b);
                     var m = L.circleMarker(ll, {
                         radius: self.graphEditMode ? 8 : 5,
                         fillColor: '#7c3aed',
@@ -762,8 +756,8 @@
                     if (!wa || !wb || !wa.center || !wb.center) return;
                     L.polyline(
                         [
-                            rtabGraphAlignWorldToMapLL(Number(wa.center.x), Number(wa.center.y), b),
-                            rtabGraphAlignWorldToMapLL(Number(wb.center.x), Number(wb.center.y), b),
+                            worldToMapLatLng(Number(wa.center.x), Number(wa.center.y), b),
+                            worldToMapLatLng(Number(wb.center.x), Number(wb.center.y), b),
                         ],
                         { color: '#7c3aed', weight: 3, opacity: 0.78, lineCap: 'round' }
                     ).addTo(wpEdgeLayer);
@@ -774,8 +768,8 @@
                     if (!pu || !wa || pu.x == null || pu.y == null || !wa.center) return;
                     L.polyline(
                         [
-                            rtabGraphAlignWorldToMapLL(Number(pu.x), Number(pu.y), b),
-                            rtabGraphAlignWorldToMapLL(Number(wa.center.x), Number(wa.center.y), b),
+                            worldToMapLatLng(Number(pu.x), Number(pu.y), b),
+                            worldToMapLatLng(Number(wa.center.x), Number(wa.center.y), b),
                         ],
                         {
                             color: '#ea580c',
@@ -789,7 +783,7 @@
                 (this.pickupsRaw || []).forEach(function (p) {
                     if (p.x == null || p.y == null) return;
                     var pid = String(p.id);
-                    var ll = rtabGraphAlignWorldToMapLL(Number(p.x), Number(p.y), b);
+                    var ll = worldToMapLatLng(Number(p.x), Number(p.y), b);
                     var pm = L.circleMarker(ll, {
                         radius: self.graphEditMode ? 7 : 4,
                         fillColor: '#fdba74',
