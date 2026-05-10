@@ -125,7 +125,10 @@
     <div class="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 space-y-2" x-show="mapReady">
         <h2 class="text-sm font-bold text-amber-900">Né vật cản — <span class="font-mono text-xs text-amber-800" x-text="topicAvoidLabel"></span></h2>
         <p class="text-xs text-amber-900/90 leading-relaxed">
-            Waypoint né chướng ngại vật (theo robot). Cập nhật realtime trên map (đường cam nét đứt + điểm).
+            Waypoint né chướng ngại vật (thường là tọa độ <strong>base_link</strong> quanh robot). Trang sẽ đổi sang hệ <strong>map</strong>
+            khi có <code class="text-[10px]">frame_id</code>/<code class="text-[10px]">coordinate_frame</code> chứa <code class="text-[10px]">base</code>, hoặc cờ <code class="text-[10px]">robot_relative</code>/<code class="text-[10px]">in_base_link</code>,
+            hoặc toàn bộ điểm nằm trong ô ±40&nbsp;m và không trùng vị trí robot trên map (heuristic). Gửi <code class="text-[10px]">map_coordinates: true</code> nếu payload đã là map (mét) giống dataset.
+            Cập nhật realtime trên map (đường cam nét đứt + điểm).
             Rời trang Tracking thì lớp này bị xóa — quay lại sẽ trống cho đến khi có tin MQTT mới.
         </p>
         <div class="flex flex-wrap gap-4 text-xs text-amber-950">
@@ -197,6 +200,66 @@
 
     function rtabGraphAlignWorldToMapLL(wx, wy, bb) {
         return worldToMapLatLng(wx, graphDisplayWorldY(wy, bb), bb);
+    }
+
+    /** Lấy mảng tọa độ từ payload né vật (nhiều kiểu key giống path ROS). */
+    function avoidanceExtractPathArrays(aw) {
+        if (!aw || typeof aw !== 'object') return null;
+        if (Array.isArray(aw.wp_x) && Array.isArray(aw.wp_y)) return { xs: aw.wp_x, ys: aw.wp_y };
+        if (Array.isArray(aw.stage_x) && Array.isArray(aw.stage_y)) return { xs: aw.stage_x, ys: aw.stage_y };
+        if (Array.isArray(aw.path_x) && Array.isArray(aw.path_y)) return { xs: aw.path_x, ys: aw.path_y };
+        if (Array.isArray(aw.x) && Array.isArray(aw.y)) return { xs: aw.x, ys: aw.y };
+        if (Array.isArray(aw.poses)) {
+            var xa = [], ya = [];
+            aw.poses.forEach(function (p) {
+                if (!p) return;
+                var pos = (p.pose && p.pose.position) ? p.pose.position : (p.position || p);
+                if (pos && pos.x != null && pos.y != null) {
+                    xa.push(pos.x);
+                    ya.push(pos.y);
+                }
+            });
+            if (xa.length) return { xs: xa, ys: ya };
+        }
+        return null;
+    }
+
+    /**
+     * Path né vật thường là tọa độ **base_link** (mét quanh robot), trong khi map/pose là **map**.
+     * Đổi sang map nếu frame/header nói base_link, cờ explicit, hoặc toàn điểm nằm trong ô local nhỏ (heuristic).
+     */
+    function avoidanceShouldTransformToMap(aw, xs, ys, lastPose) {
+        if (!lastPose || lastPose.yw == null || isNaN(Number(lastPose.yw))) return false;
+        if (aw && (aw.map_coordinates === true || aw.in_map_frame === true || aw.map_frame === true)) return false;
+        if (aw && (aw.robot_relative === true || aw.in_base_link === true || aw.base_link === true)) return true;
+        var f = String((aw && aw.frame_id) || (aw && aw.header && aw.header.frame_id) || (aw && aw.coordinate_frame) || '').toLowerCase();
+        if (f.indexOf('map') >= 0 && f.indexOf('base') < 0) return false;
+        if (f.indexOf('base') >= 0 || f.indexOf('body') >= 0) return true;
+        var n = Math.min(xs.length, ys.length);
+        if (lastPose && !isNaN(Number(lastPose.nx)) && !isNaN(Number(lastPose.ny))) {
+            var rx = Number(lastPose.nx), ry = Number(lastPose.ny);
+            for (var i = 0; i < n; i++) {
+                var px = Number(xs[i]), py = Number(ys[i]);
+                if (isNaN(px) || isNaN(py)) continue;
+                if (haversineMeters([px, py], [rx, ry]) < 8) return false;
+            }
+        }
+        var maxAbs = 0;
+        for (var j = 0; j < n; j++) {
+            var vx = Math.abs(Number(xs[j])), vy = Math.abs(Number(ys[j]));
+            if (!isFinite(vx) || !isFinite(vy)) return false;
+            maxAbs = Math.max(maxAbs, vx, vy);
+        }
+        return maxAbs <= 40;
+    }
+
+    function avoidanceLocalToWorldMeters(lx, ly, lastPose) {
+        var yaw = Number(lastPose.yw), c = Math.cos(yaw), s = Math.sin(yaw);
+        var rx = Number(lastPose.nx), ry = Number(lastPose.ny);
+        return {
+            wx: rx + c * Number(lx) - s * Number(ly),
+            wy: ry + s * Number(lx) + c * Number(ly),
+        };
     }
 
     function normalizeWpEdge(x) {
@@ -347,22 +410,34 @@
                                     } else {
                                         self.avoidHasObstacles = null;
                                     }
-                                    var xs = aw.wp_x, ys = aw.wp_y;
-                                    if (!Array.isArray(xs) || !Array.isArray(ys)) {
+                                    var path = avoidanceExtractPathArrays(aw);
+                                    if (!path) {
                                         self.avoidWpCount = 0;
                                         return;
                                     }
+                                    var xs = path.xs, ys = path.ys;
                                     var n = Math.min(xs.length, ys.length);
                                     self.avoidWpCount = n;
                                     if (n === 0 || !avoidWpLayer) {
                                         return;
                                     }
+                                    var bb = graphBounds;
+                                    if (!bb) {
+                                        return;
+                                    }
+                                    var toMap = avoidanceShouldTransformToMap(aw, xs, ys, lastPoseWorld);
                                     var latlngs = [];
                                     for (var ai = 0; ai < n; ai++) {
-                                        var ax = Number(xs[ai]), ay = Number(ys[ai]);
-                                        if (isNaN(ax) || isNaN(ay)) continue;
-                                        var all = graphBounds ? poseToMapLL(ax, ay) : null;
-                                        if (all) latlngs.push({ ll: all, ax: ax, ay: ay });
+                                        var lx = Number(xs[ai]), ly = Number(ys[ai]);
+                                        if (isNaN(lx) || isNaN(ly)) continue;
+                                        var wx = lx, wy = ly;
+                                        if (toMap && lastPoseWorld) {
+                                            var wpt = avoidanceLocalToWorldMeters(lx, ly, lastPoseWorld);
+                                            wx = wpt.wx;
+                                            wy = wpt.wy;
+                                        }
+                                        var all = rtabGraphAlignWorldToMapLL(wx, wy, bb);
+                                        if (all) latlngs.push({ ll: all, ax: wx, ay: wy });
                                     }
                                     if (latlngs.length > 1) {
                                         L.polyline(latlngs.map(function (q) { return q.ll; }), {
