@@ -136,11 +136,10 @@
     <div class="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 space-y-2" x-show="mapReady">
         <h2 class="text-sm font-bold text-amber-900">Né vật cản — <span class="font-mono text-xs text-amber-800" x-text="topicAvoidLabel"></span></h2>
         <p class="text-xs text-amber-900/90 leading-relaxed">
-            Waypoint né chướng ngại vật (thường là tọa độ <strong>base_link</strong> quanh robot). Trang sẽ đổi sang hệ <strong>map</strong>
-            khi có <code class="text-[10px]">frame_id</code>/<code class="text-[10px]">coordinate_frame</code> chứa <code class="text-[10px]">base</code>, hoặc cờ <code class="text-[10px]">robot_relative</code>/<code class="text-[10px]">in_base_link</code>,
-            hoặc toàn bộ điểm nằm trong ô ±40&nbsp;m và không trùng vị trí robot trên map (heuristic). Gửi <code class="text-[10px]">map_coordinates: true</code> nếu payload đã là map (mét) giống dataset.
-            Cập nhật realtime trên map (đường cam nét đứt + điểm).
-            Rời trang Tracking thì lớp này bị xóa — quay lại sẽ trống cho đến khi có tin MQTT mới.
+            <strong>Tiếng Việt:</strong> <code class="text-[10px]">wp_x</code>/<code class="text-[10px]">wp_y</code> mặc định là tọa độ <strong>map / world (mét)</strong>, vẽ giống waypoint dataset &amp; pickup (cùng hàm chiếu).
+            Chỉ khi đúng là tọa độ <strong>base_link</strong> quanh robot, hãy gửi thêm <code class="text-[10px]">robot_relative: true</code> hoặc <code class="text-[10px]">in_base_link: true</code>, hoặc <code class="text-[10px]">frame_id</code> (vd. <code class="text-[10px]">base_link</code>).
+            <strong>English:</strong> By default, avoidance points are treated as <strong>map-frame meters</strong> like the waypoint graph. Set <code class="text-[10px]">robot_relative</code>/<code class="text-[10px]">in_base_link</code> or a <code class="text-[10px]">base_*</code> <code class="text-[10px]">frame_id</code> only if the numbers are truly in the robot body frame.
+            Realtime polyline + markers; layer clears when you leave this page.
         </p>
         <div class="flex flex-wrap gap-4 text-xs text-amber-950">
             <span><strong>has_waypoint</strong>: <span class="font-mono" x-text="avoidHasWaypoint === null ? '—' : avoidHasWaypoint"></span></span>
@@ -236,32 +235,18 @@
     }
 
     /**
-     * Path né vật thường là tọa độ **base_link** (mét quanh robot), trong khi map/pose là **map**.
-     * Đổi sang map nếu frame/header nói base_link, cờ explicit, hoặc toàn điểm nằm trong ô local nhỏ (heuristic).
+     * Chỉ đổi base_link → map khi payload **nói rõ** là tọa độ quanh robot.
+     * Mặc định coi wp_x/wp_y là **map / world (mét)** giống waypoint dataset — tránh heuristic |x|,|y|≤40
+     * làm sai với map gần gốc tọa độ.
      */
-    function avoidanceShouldTransformToMap(aw, xs, ys, lastPose) {
-        if (!lastPose || lastPose.yw == null || isNaN(Number(lastPose.yw))) return false;
-        if (aw && (aw.map_coordinates === true || aw.in_map_frame === true || aw.map_frame === true)) return false;
-        if (aw && (aw.robot_relative === true || aw.in_base_link === true || aw.base_link === true)) return true;
-        var f = String((aw && aw.frame_id) || (aw && aw.header && aw.header.frame_id) || (aw && aw.coordinate_frame) || '').toLowerCase();
-        if (f.indexOf('map') >= 0 && f.indexOf('base') < 0) return false;
-        if (f.indexOf('base') >= 0 || f.indexOf('body') >= 0) return true;
-        var n = Math.min(xs.length, ys.length);
-        if (lastPose && !isNaN(Number(lastPose.nx)) && !isNaN(Number(lastPose.ny))) {
-            var rx = Number(lastPose.nx), ry = Number(lastPose.ny);
-            for (var i = 0; i < n; i++) {
-                var px = Number(xs[i]), py = Number(ys[i]);
-                if (isNaN(px) || isNaN(py)) continue;
-                if (haversineMeters([px, py], [rx, ry]) < 8) return false;
-            }
-        }
-        var maxAbs = 0;
-        for (var j = 0; j < n; j++) {
-            var vx = Math.abs(Number(xs[j])), vy = Math.abs(Number(ys[j]));
-            if (!isFinite(vx) || !isFinite(vy)) return false;
-            maxAbs = Math.max(maxAbs, vx, vy);
-        }
-        return maxAbs <= 40;
+    function avoidanceShouldTransformToMap(aw) {
+        if (!aw || typeof aw !== 'object') return false;
+        if (aw.map_coordinates === true || aw.in_map_frame === true || aw.map_frame === true) return false;
+        if (aw.robot_relative === true || aw.in_base_link === true || aw.base_link === true) return true;
+        var f = String((aw.frame_id) || (aw.header && aw.header.frame_id) || (aw.coordinate_frame) || '').toLowerCase();
+        if (f && f.indexOf('map') >= 0 && f.indexOf('base') < 0) return false;
+        if (f && (f.indexOf('base') >= 0 || f.indexOf('body') >= 0)) return true;
+        return false;
     }
 
     function avoidanceLocalToWorldMeters(lx, ly, lastPose) {
@@ -464,7 +449,7 @@
                                     if (!bb) {
                                         return;
                                     }
-                                    var toMap = avoidanceShouldTransformToMap(aw, xs, ys, lastPoseWorld);
+                                    var toMap = avoidanceShouldTransformToMap(aw);
                                     var latlngs = [];
                                     for (var ai = 0; ai < n; ai++) {
                                         var lx = Number(xs[ai]), ly = Number(ys[ai]);
