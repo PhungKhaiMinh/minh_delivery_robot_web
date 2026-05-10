@@ -44,16 +44,17 @@
             Bản đồ occupancy PGM (Admin Tracking)
         </p>
         <p class="text-xs text-slate-500">
-            Tải file <code class="bg-slate-100 px-1 rounded">.pgm</code> (ví dụ <code class="font-mono">map_cs1.pgm</code>).
-            Trang <strong>Tracking</strong> hiển thị ảnh map 2D (Leaflet), pose MQTT, waypoint graph và điểm né vật cản.
-            Nếu có <code class="font-mono">map.yaml</code> kiểu ROS (trường <code class="text-xs">resolution</code>, <code class="text-xs">origin</code>), chọn cùng lúc để khớp tỉ lệ mét — không thì dùng biến môi trường
+            <strong>Tiếng Việt:</strong> Có hai cách: (1) <em>Ghi đè file đích</em> — tải PGM/YAML lên đúng đường dẫn <code class="font-mono">OCC_GRID_MAP_PATH</code> (Railway/volume).
+            (2) <em>Thư viện</em> — thêm nhiều bộ PGM+YAML; trang Tracking chọn map theo id (hoặc mặc định theo map <em>active</em> trong thư viện, nếu không có thì dùng env).
+            <strong>English:</strong> Either overwrite the single <code class="font-mono">OCC_GRID_MAP_PATH</code> file, or add maps to the on-disk library and pick one on Tracking.
+            ROS <code class="font-mono">map.yaml</code> (<code class="text-xs">resolution</code>, <code class="text-xs">origin</code>) is optional; otherwise use
             <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_RESOLUTION</code>, <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_ORIGIN_X</code>, <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_ORIGIN_Y</code>.
-            Railway: <code class="bg-slate-100 px-1 rounded">OCC_GRID_MAP_PATH=/data/map.pgm</code> trên volume.
         </p>
         <dl class="text-xs space-y-1 font-mono text-slate-700 bg-slate-50 rounded-xl p-3 border border-slate-100">
             <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Đường dẫn server</dt><dd class="break-all" x-text="occPath || occGridMapPath"></dd></div>
             <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">Có file</dt><dd><span x-text="occExists ? 'Có' : 'Chưa'"></span> · <span x-text="occBytesLabel"></span> · <span x-text="occWHLabel"></span> · res: <span x-text="occResLabel"></span> · YAML: <span x-text="occYamlLabel"></span></dd></div>
         </dl>
+        <p class="text-xs font-semibold text-slate-700">Ghi đè <code class="font-mono">OCC_GRID_MAP_PATH</code></p>
         <div class="flex flex-wrap items-end gap-3">
             <label class="block min-w-[12rem] flex-1">
                 <span class="text-xs font-medium text-slate-600">Chọn PGM (.pgm)</span>
@@ -71,12 +72,65 @@
                 <span x-show="!occUploading">Tải lên &amp; lưu</span>
                 <span x-show="occUploading">Đang tải…</span>
             </button>
-            <button type="button" @click="refreshOccGridStatus()" class="px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 shrink-0">
+            <button type="button" @click="refreshOccGridStatus(); refreshOccMaps()" class="px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 shrink-0">
                 Làm mới trạng thái
             </button>
         </div>
         <p class="text-xs text-emerald-700 font-medium min-h-[1rem]" x-show="occMsg" x-text="occMsg"></p>
         <p class="text-xs text-red-600 min-h-[1rem]" x-show="occErr" x-text="occErr"></p>
+
+        <div class="border-t border-slate-200 pt-4 mt-4 space-y-3">
+            <p class="text-xs font-semibold text-slate-700">Thư viện map (nhiều PGM + YAML) / Map library</p>
+            <p class="text-xs text-slate-500">Map vừa thêm được đặt <em>active</em> tự động. Tracking: chọn map trong dropdown (hoặc để mặc định = active / env).</p>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" @click="refreshOccMaps()" class="px-3 py-1.5 text-xs font-semibold border border-slate-200 rounded-lg hover:bg-slate-50">Làm mới danh sách</button>
+                <button type="button" @click="clearOccLibraryActive()" :disabled="occLibBusy"
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-100 text-slate-800 hover:bg-slate-200 disabled:opacity-50">
+                    Bỏ active thư viện (dùng OCC_GRID_MAP_PATH)
+                </button>
+            </div>
+            <p class="text-xs text-slate-500" x-show="occActiveId">Active hiện tại: <code class="bg-slate-100 px-1 rounded" x-text="occActiveId"></code></p>
+            <div class="rounded-lg border border-slate-200 divide-y divide-slate-100 max-h-56 overflow-y-auto bg-white" x-show="occMaps.length">
+                <template x-for="m in occMaps" :key="m.id">
+                    <div class="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
+                        <span class="font-mono text-[11px] shrink-0" x-text="m.id"></span>
+                        <span class="text-slate-700 truncate max-w-[10rem]" x-text="m.label"></span>
+                        <span class="text-slate-400" x-text="m.has_yaml ? '· yaml' : ''"></span>
+                        <span class="text-emerald-600 font-semibold shrink-0" x-show="occActiveId === m.id">active</span>
+                        <span class="grow"></span>
+                        <button type="button" @click="setOccLibraryActive(m.id)" :disabled="occLibBusy"
+                            class="px-2 py-1 rounded-md bg-sky-600 text-white text-[11px] font-semibold hover:bg-sky-700 disabled:opacity-50">Đặt active</button>
+                        <button type="button" @click="deleteOccMap(m.id)" :disabled="occLibBusy"
+                            class="px-2 py-1 rounded-md border border-red-200 text-red-700 text-[11px] hover:bg-red-50 disabled:opacity-50">Xóa</button>
+                    </div>
+                </template>
+            </div>
+            <p class="text-xs text-slate-400" x-show="!occMaps.length">Chưa có map trong thư viện. / No maps in library yet.</p>
+            <p class="text-xs text-emerald-700 min-h-[1rem]" x-show="occLibMsg" x-text="occLibMsg"></p>
+            <p class="text-xs text-red-600 min-h-[1rem]" x-show="occLibErr" x-text="occLibErr"></p>
+            <div class="flex flex-wrap items-end gap-3">
+                <label class="block min-w-[8rem]">
+                    <span class="text-xs font-medium text-slate-600">Nhãn / Label</span>
+                    <input type="text" x-model="occNewLibLabel" placeholder="Campus A"
+                        class="mt-1 block w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5" />
+                </label>
+                <label class="block min-w-[10rem] flex-1">
+                    <span class="text-xs font-medium text-slate-600">PGM</span>
+                    <input type="file" accept=".pgm,.pnm,image/x-portable-graymap,application/octet-stream" x-ref="occLibPgmFile"
+                        class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-violet-100 file:text-violet-900" />
+                </label>
+                <label class="block min-w-[8rem] flex-1">
+                    <span class="text-xs font-medium text-slate-600">YAML</span>
+                    <input type="file" accept=".yaml,.yml,text/yaml,application/x-yaml" x-ref="occLibYamlFile"
+                        class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-slate-100 file:text-slate-700" />
+                </label>
+                <button type="button" @click="uploadOccToLibrary()" :disabled="occLibUploading || occLibBusy"
+                    class="px-3 py-2 rounded-xl text-xs font-semibold text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 shrink-0">
+                    <span x-show="!occLibUploading">Thêm vào thư viện</span>
+                    <span x-show="occLibUploading">Đang tải…</span>
+                </button>
+            </div>
+        </div>
     </div>
 
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-6">
@@ -416,6 +470,123 @@ function adminSettings(cfg) {
         occUploading: false,
         occMsg: '',
         occErr: '',
+        occMaps: [],
+        occActiveId: null,
+        occLibMsg: '',
+        occLibErr: '',
+        occLibUploading: false,
+        occLibBusy: false,
+        occNewLibLabel: '',
+
+        async refreshOccMaps() {
+            var self = this;
+            try {
+                var res = await fetch('/api/admin/occ-grid/maps', { credentials: 'same-origin' });
+                var d = await res.json().catch(function () { return null; });
+                if (!d || !Array.isArray(d.maps)) return;
+                self.occMaps = d.maps;
+                self.occActiveId = d.active_id || null;
+            } catch (e) { /* ignore */ }
+        },
+
+        async setOccLibraryActive(mapId) {
+            var self = this;
+            self.occLibErr = '';
+            self.occLibMsg = '';
+            self.occLibBusy = true;
+            try {
+                var res = await fetch('/api/admin/occ-grid/maps/activate', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ map_id: mapId }),
+                });
+                var data = await res.json().catch(function () { return {}; });
+                if (!res.ok) {
+                    self.occLibErr = data.detail || data.message || ('HTTP ' + res.status);
+                    return;
+                }
+                self.occLibMsg = data.message || 'Đã cập nhật.';
+                self.occMaps = data.maps || self.occMaps;
+                self.occActiveId = data.active_id != null ? data.active_id : null;
+                await self.refreshOccGridStatus();
+            } catch (e) {
+                self.occLibErr = e.message || String(e);
+            } finally {
+                self.occLibBusy = false;
+            }
+        },
+
+        async clearOccLibraryActive() {
+            await this.setOccLibraryActive(null);
+        },
+
+        async deleteOccMap(mapId) {
+            var self = this;
+            if (!mapId || !window.confirm('Xóa map này khỏi server? / Delete this map from the server?')) return;
+            self.occLibErr = '';
+            self.occLibMsg = '';
+            self.occLibBusy = true;
+            try {
+                var res = await fetch('/api/admin/occ-grid/maps/' + encodeURIComponent(mapId), {
+                    method: 'DELETE',
+                    credentials: 'same-origin',
+                });
+                var data = await res.json().catch(function () { return {}; });
+                if (!res.ok) {
+                    self.occLibErr = data.detail || data.message || ('HTTP ' + res.status);
+                    return;
+                }
+                self.occLibMsg = data.message || 'Đã xóa.';
+                self.occMaps = data.maps || [];
+                self.occActiveId = data.active_id != null ? data.active_id : null;
+                await self.refreshOccGridStatus();
+            } catch (e) {
+                self.occLibErr = e.message || String(e);
+            } finally {
+                self.occLibBusy = false;
+            }
+        },
+
+        async uploadOccToLibrary() {
+            var self = this;
+            var inp = this.$refs.occLibPgmFile;
+            var yInp = this.$refs.occLibYamlFile;
+            self.occLibErr = '';
+            self.occLibMsg = '';
+            if (!inp || !inp.files || !inp.files[0]) {
+                self.occLibErr = 'Chọn file .pgm / Pick a .pgm file';
+                return;
+            }
+            var fd = new FormData();
+            fd.append('label', (self.occNewLibLabel || '').trim());
+            fd.append('pgm', inp.files[0]);
+            if (yInp && yInp.files && yInp.files[0]) {
+                fd.append('yaml', yInp.files[0]);
+            }
+            self.occLibUploading = true;
+            try {
+                var res = await fetch('/api/admin/occ-grid/maps', { method: 'POST', credentials: 'same-origin', body: fd });
+                var data = await res.json().catch(function () { return {}; });
+                if (!res.ok) {
+                    var det = data.detail;
+                    if (typeof det === 'string') self.occLibErr = det;
+                    else if (Array.isArray(det) && det[0] && det[0].msg) self.occLibErr = det[0].msg;
+                    else self.occLibErr = data.message || ('HTTP ' + res.status);
+                    return;
+                }
+                self.occLibMsg = data.message || 'Đã thêm map.';
+                self.occMaps = data.maps || [];
+                self.occActiveId = data.active_id != null ? data.active_id : null;
+                inp.value = '';
+                if (yInp) yInp.value = '';
+                await self.refreshOccGridStatus();
+            } catch (e) {
+                self.occLibErr = e.message || String(e);
+            } finally {
+                self.occLibUploading = false;
+            }
+        },
 
         async refreshOccGridStatus() {
             var self = this;
@@ -467,6 +638,12 @@ function adminSettings(cfg) {
                 }
                 self.occMsg = data.message || 'Đã lưu PGM.';
                 await self.refreshOccGridStatus();
+                if (data.library && Array.isArray(data.library.maps)) {
+                    self.occMaps = data.library.maps;
+                    self.occActiveId = data.library.active_id != null ? data.library.active_id : null;
+                } else {
+                    await self.refreshOccMaps();
+                }
                 inp.value = '';
                 if (yInp) yInp.value = '';
             } catch (e) {
@@ -567,6 +744,7 @@ function adminSettings(cfg) {
             window.addEventListener('keydown', self._onArrowKeyDown, true);
             window.addEventListener('keyup', self._onArrowKeyUp, true);
             self.refreshOccGridStatus();
+            self.refreshOccMaps();
         },
 
         _resolveActiveArrowDir() {

@@ -4,12 +4,15 @@ API JSON cho Admin Dashboard (yêu cầu role admin).
 
 import gzip
 import json
+from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
 
 from app.config import (
+    OCC_GRID_MAP_PATH,
     MQTT_WS_URL,
     MQTT_BROKER_HOST,
     MQTT_BROKER_PORT_TCP,
@@ -53,6 +56,14 @@ from app.services.robot_waypoints_dataset_store import (
     set_waypoints_dataset,
 )
 from app.services.admin_route_planner import plan_field_route
+from app.services.occ_maps_store import (
+    create_map_from_upload,
+    delete_map,
+    list_maps_public,
+    resolve_occ_pgm_path,
+    set_active_map,
+    validate_map_id,
+)
 from app.services.pgm_map_service import (
     build_occ_grid_meta,
     get_occ_grid_status,
@@ -61,6 +72,12 @@ from app.services.pgm_map_service import (
 )
 
 router = APIRouter(prefix="/api/admin", tags=["Admin API"])
+
+
+class OccActiveMapBody(BaseModel):
+    """``map_id`` null hoặc rỗng = dùng ``OCC_GRID_MAP_PATH`` (bỏ active thư viện)."""
+
+    map_id: Optional[str] = None
 
 
 @router.get("/config")
@@ -93,26 +110,136 @@ async def admin_mqtt_config(request: Request):
     )
 
 
-@router.get("/occ-grid/meta")
-async def admin_occ_grid_meta(request: Request):
-    """Bounds (mét) + meta cho Leaflet Tracking (PGM → PNG)."""
+@router.get("/occ-grid/maps")
+async def admin_occ_grid_maps_list(request: Request):
+    """Danh sách map trong thư mục ``data/occ_maps`` + ``active_id``."""
     require_admin(request)
-    return JSONResponse(content=build_occ_grid_meta())
+    return JSONResponse(content=list_maps_public())
+
+
+@router.post("/occ-grid/maps")
+async def admin_occ_grid_maps_upload(
+    request: Request,
+    label: str = Form(""),
+    pgm: UploadFile = File(...),
+    yaml: Optional[UploadFile] = File(default=None),
+):
+    """Thêm một map vào thư viện (PGM + YAML tùy chọn), đặt làm active."""
+    require_admin(request)
+    name = (pgm.filename or "").strip().lower()
+    if not name.endswith((".pgm", ".pnm")):
+        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file .pgm")
+    yn = (yaml.filename or "").strip().lower() if yaml else ""
+    if yaml and yn and not yn.endswith((".yaml", ".yml")):
+        raise HTTPException(status_code=400, detail="File kèm phải là .yaml hoặc .yml")
+    ok, msg, new_id = await create_map_from_upload(label, pgm, yaml_upload=yaml)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    out = list_maps_public()
+    out["message"] = msg
+    out["new_map_id"] = new_id
+    return JSONResponse(content=out)
+
+
+@router.post("/occ-grid/maps/activate")
+async def admin_occ_grid_maps_activate(request: Request, body: OccActiveMapBody):
+    """Đặt ``active_id`` thư viện (hoặc bỏ để Tracking dùng ``OCC_GRID_MAP_PATH``)."""
+    require_admin(request)
+    ok, msg = set_active_map(body.map_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    out = list_maps_public()
+    out["message"] = msg
+    return JSONResponse(content=out)
+
+
+@router.delete("/occ-grid/maps/{map_id}")
+async def admin_occ_grid_maps_delete(request: Request, map_id: str):
+    """Xóa map khỏi thư mục thư viện và registry."""
+    require_admin(request)
+    ok, msg = delete_map(map_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    out = list_maps_public()
+    out["message"] = msg
+    return JSONResponse(content=out)
+
+
+@router.get("/occ-grid/meta")
+async def admin_occ_grid_meta(request: Request, map_id: Optional[str] = None):
+    """Bounds (mét) + meta cho Leaflet Tracking (PGM → PNG). Tham số ``map_id`` tùy chọn."""
+    require_admin(request)
+    raw = (map_id or "").strip() or None
+    if raw and not validate_map_id(raw):
+        return JSONResponse(
+            content={"success": False, "message": "map_id không hợp lệ.", "map_id": raw}
+        )
+    p = resolve_occ_pgm_path(raw)
+    if raw and p is None:
+        return JSONResponse(
+            content={
+                "success": False,
+                "message": "Không tìm thấy PGM cho map_id này.",
+                "map_id": raw,
+            }
+        )
+    if p is None or not p.is_file():
+        return JSONResponse(
+            content={
+                "success": False,
+                "message": "Không có file PGM (OCC_GRID_MAP_PATH hoặc thư viện).",
+                "path": str(Path(OCC_GRID_MAP_PATH).resolve()),
+                "map_id": raw,
+            }
+        )
+    return JSONResponse(content=build_occ_grid_meta(p, map_id=raw))
 
 
 @router.get("/occ-grid/status")
-async def admin_occ_grid_status(request: Request):
-    """Trạng thái file PGM trên disk."""
+async def admin_occ_grid_status(request: Request, map_id: Optional[str] = None):
+    """Trạng thái file PGM trên disk (có thể theo ``map_id`` thư viện)."""
     require_admin(request)
-    return JSONResponse(content=get_occ_grid_status())
+    raw = (map_id or "").strip() or None
+    if raw and not validate_map_id(raw):
+        return JSONResponse(
+            content={"valid": False, "message": "map_id không hợp lệ.", "map_id": raw}
+        )
+    p = resolve_occ_pgm_path(raw)
+    if raw and p is None:
+        return JSONResponse(
+            content={
+                "valid": False,
+                "message": "Không tìm thấy PGM cho map_id này.",
+                "map_id": raw,
+            }
+        )
+    if p is None or not p.is_file():
+        return JSONResponse(
+            content={
+                "path": str(Path(OCC_GRID_MAP_PATH).resolve()),
+                "exists": False,
+                "valid": False,
+                "message": "Không có file PGM.",
+                "map_id": raw,
+            }
+        )
+    return JSONResponse(content=get_occ_grid_status(p, map_id=raw))
 
 
 @router.get("/occ-grid/image.png")
-async def admin_occ_grid_image_png(request: Request):
-    """Ảnh PNG render từ PGM (cùng cookie admin)."""
+async def admin_occ_grid_image_png(request: Request, map_id: Optional[str] = None):
+    """Ảnh PNG render từ PGM (cùng cookie admin). Tham số ``map_id`` tùy chọn."""
     require_admin(request)
+    raw = (map_id or "").strip() or None
+    if raw and not validate_map_id(raw):
+        raise HTTPException(status_code=404, detail="map_id không hợp lệ.")
+    p = resolve_occ_pgm_path(raw)
+    if raw and (p is None or not p.is_file()):
+        raise HTTPException(status_code=404, detail="Không có PGM cho map_id này.")
+    if p is None or not p.is_file():
+        raise HTTPException(status_code=404, detail="Không có file PGM.")
     try:
-        png, _, _ = pgm_to_png_bytes()
+        png, _, _ = pgm_to_png_bytes(p)
     except (OSError, ValueError, RuntimeError) as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     return Response(content=png, media_type="image/png")
@@ -140,6 +267,7 @@ async def admin_occ_grid_upload(
             "success": True,
             "message": msg,
             "status": get_occ_grid_status(),
+            "library": list_maps_public(),
         }
     )
 

@@ -41,6 +41,7 @@ env/
 
 # Data files (generated at runtime)
 data/collections/
+data/occ_maps/
 
 # Occupancy PGM (OCC_GRID_MAP_PATH) — file lớn không commit; deploy bằng volume / upload Settings
 map_cs1.pgm

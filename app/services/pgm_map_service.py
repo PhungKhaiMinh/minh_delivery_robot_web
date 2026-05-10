@@ -14,6 +14,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import (
@@ -32,10 +33,20 @@ except ImportError:  # pragma: no cover
 
 
 def _yaml_path_for_pgm(pgm: Path) -> Path:
+    """Ưu tiên ``<pgm_stem>.yaml`` cạnh PGM; sau đó ``OCC_GRID_MAP_YAML_PATH`` (nhiều map mỗi thư mục có yaml riêng)."""
+    colocated = pgm.with_suffix(".yaml")
+    try:
+        if colocated.is_file():
+            return colocated.resolve()
+    except OSError:
+        pass
     explicit = (OCC_GRID_MAP_YAML_PATH or "").strip()
     if explicit:
         return Path(explicit).resolve()
-    return pgm.with_suffix(".yaml")
+    try:
+        return colocated.resolve()
+    except OSError:
+        return colocated
 
 
 def _parse_ros_map_yaml(text: str) -> Tuple[Optional[float], Optional[List[float]]]:
@@ -201,8 +212,11 @@ def compute_world_bounds(
     return {"xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax}
 
 
-def build_occ_grid_meta(pgm_path: Optional[Path] = None) -> Dict[str, Any]:
+def build_occ_grid_meta(pgm_path: Optional[Path] = None, map_id: Optional[str] = None) -> Dict[str, Any]:
     p = Path(pgm_path or OCC_GRID_MAP_PATH).resolve()
+    mid = (map_id or "").strip() or None
+    img_base = "/api/admin/occ-grid/image.png"
+    image_url = f"{img_base}?map_id={quote(mid, safe='')}" if mid else img_base
     out: Dict[str, Any] = {
         "success": False,
         "path": str(p),
@@ -215,7 +229,8 @@ def build_occ_grid_meta(pgm_path: Optional[Path] = None) -> Dict[str, Any]:
         "origin_x": None,
         "origin_y": None,
         "yaml_used": False,
-        "image_url": "/api/admin/occ-grid/image.png",
+        "image_url": image_url,
+        "map_id": mid,
     }
     if not p.is_file():
         out["message"] = f"Không có file PGM: {p}"
@@ -261,9 +276,9 @@ def build_occ_grid_meta(pgm_path: Optional[Path] = None) -> Dict[str, Any]:
     return out
 
 
-def get_occ_grid_status(pgm_path: Optional[Path] = None) -> Dict[str, Any]:
-    meta = build_occ_grid_meta(pgm_path)
-    p = Path(pgm_path or OCC_GRID_MAP_PATH).resolve()
+def get_occ_grid_status(pgm_path: Optional[Path] = None, map_id: Optional[str] = None) -> Dict[str, Any]:
+    meta = build_occ_grid_meta(pgm_path, map_id=map_id)
+    p = Path(meta.get("path") or (pgm_path or OCC_GRID_MAP_PATH)).resolve()
     status: Dict[str, Any] = {
         "path": str(p),
         "exists": p.is_file(),
@@ -273,6 +288,7 @@ def get_occ_grid_status(pgm_path: Optional[Path] = None) -> Dict[str, Any]:
         "resolution": meta.get("resolution"),
         "yaml_used": meta.get("yaml_used"),
         "message": meta.get("message", ""),
+        "map_id": meta.get("map_id"),
     }
     if p.is_file():
         try:

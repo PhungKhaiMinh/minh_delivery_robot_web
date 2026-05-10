@@ -28,15 +28,15 @@
     "occImageBase": "/api/admin/occ-grid/image.png",
     "occMapPath": occ_grid_map_path,
 } %}
-<div class="max-w-7xl mx-auto space-y-6" x-data='adminTracking({{ tracking_cfg|tojson }})' x-init="init()">
+<div class="max-w-7xl mx-auto space-y-6" x-data="adminTracking(Object.assign({{ tracking_cfg|tojson }}, { occMapId: (function(){ try { return localStorage.getItem('admin_tracking_occ_map_id')||''; } catch(e){ return ''; } })() }))" x-init="init()">
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Tracking</h1>
         <p class="text-sm text-slate-500 mt-1">
-            Bản đồ occupancy <code class="text-xs bg-slate-200 px-1 rounded">.pgm</code> trên server
-            (<code class="text-xs font-mono" x-text="occMapPathLabel"></code>) — chuyển PNG, hiển thị Leaflet (mét).
-            Có thể kèm <code class="text-xs bg-slate-200 px-1 rounded">map.yaml</code> (ROS: <code class="text-xs">resolution</code> + <code class="text-xs">origin</code>) khi tải lên tại
-            <a href="/admin/settings" class="text-sky-700 font-medium hover:underline">Settings</a>.
-            Pose realtime <code class="text-xs bg-slate-200 px-1 rounded" x-text="topicPoseLabel"></code> cùng hệ mét với map — kéo / thu phó để tương tác.
+            <strong>Tiếng Việt:</strong> Bản đồ occupancy <code class="text-xs bg-slate-200 px-1 rounded">.pgm</code> (PNG + Leaflet, mét). Chọn map từ thư viện nếu đã tải tại
+            <a href="/admin/settings" class="text-sky-700 font-medium hover:underline">Settings</a>; mặc định = map <em>active</em> hoặc file <code class="text-xs font-mono" x-text="occMapPathLabel"></code>.
+            <strong>English:</strong> Pick a library map from the dropdown (if any); otherwise the server default (active library map or <code class="text-xs font-mono">OCC_GRID_MAP_PATH</code>) is used.
+            Optional <code class="text-xs bg-slate-200 px-1 rounded">map.yaml</code> (ROS <code class="text-xs">resolution</code> + <code class="text-xs">origin</code>) on upload.
+            Pose MQTT <code class="text-xs bg-slate-200 px-1 rounded" x-text="topicPoseLabel"></code> — pan / zoom as needed.
         </p>
     </div>
 
@@ -60,6 +60,16 @@
             Xóa quỹ đạo
         </button>
         <span class="text-xs text-red-600" x-show="errDetail" x-text="errDetail"></span>
+        <label class="flex flex-wrap items-center gap-2 text-xs text-slate-600" x-show="occMapsList.length > 0">
+            <span class="font-medium text-slate-700">Map</span>
+            <select class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white max-w-[min(18rem,85vw)]"
+                x-model="occMapSelect" @change="onOccMapSelectChange()">
+                <option value="">Mặc định (active / OCC_GRID_MAP_PATH)</option>
+                <template x-for="m in occMapsList" :key="m.id">
+                    <option :value="m.id" x-text="m.label + ' · ' + m.id.slice(0, 10) + '…'"></option>
+                </template>
+            </select>
+        </label>
     </div>
 
     <p class="text-sm text-red-600 font-medium" x-show="graphErr" x-text="graphErr"></p>
@@ -273,8 +283,10 @@
     function adminTracking(cfg) {
         cfg = cfg || {};
         var topicPose = cfg.topicPose || 'UGV/localization/pose';
-        var occMetaUrl = cfg.occMetaUrl || '/api/admin/occ-grid/meta';
-        var occImageBase = cfg.occImageBase || '/api/admin/occ-grid/image.png';
+        var occMapIdSel = String(cfg.occMapId || '').trim();
+        var mapQ = occMapIdSel ? ('?map_id=' + encodeURIComponent(occMapIdSel)) : '';
+        var occMetaUrl = (cfg.occMetaUrl || '/api/admin/occ-grid/meta') + mapQ;
+        var occImageBase = (cfg.occImageBase || '/api/admin/occ-grid/image.png') + mapQ;
 
         var map = null;
         var graphBounds = null;
@@ -335,8 +347,15 @@
             avoidWpCount: 0,
             avoidLastAt: '',
             avoidJsonPretty: '',
+            occMapsList: [],
+            occMapSelect: occMapIdSel,
 
-            init: function () {
+            onOccMapSelectChange: function () {
+                try {
+                    localStorage.setItem('admin_tracking_occ_map_id', this.occMapSelect || '');
+                } catch (e) { /* ignore */ }
+                window.location.reload();
+            },
                 var self = this;
                 if (self._trackingInitOnce) {
                     return;
@@ -361,6 +380,20 @@
                 }
                 self._bootLock = true;
                 try {
+                    try {
+                        var lr = await fetch('/api/admin/occ-grid/maps', { credentials: 'same-origin' });
+                        var ld = await lr.json().catch(function () { return null; });
+                        if (ld && ld.success && Array.isArray(ld.maps)) {
+                            self.occMapsList = ld.maps;
+                            if (self.occMapSelect && !ld.maps.some(function (m) { return m.id === self.occMapSelect; })) {
+                                self.occMapSelect = '';
+                                try {
+                                    localStorage.removeItem('admin_tracking_occ_map_id');
+                                } catch (e2) { /* ignore */ }
+                            }
+                        }
+                    } catch (e3) { /* ignore */ }
+
                     var b = null;
                     var installTrackingMqtt = function () {
                         self._clearAvoidanceOnLeave = function () {
@@ -577,7 +610,8 @@
                     map.attributionControl.addAttribution('Occupancy map (.pgm → PNG, mét)');
 
                     var fullBounds = L.latLngBounds(L.latLng(0, 0), L.latLng(h, w));
-                    var imgUrl = occImageBase + '?t=' + (meta.mtime != null ? String(meta.mtime) : '0');
+                    var sep = occImageBase.indexOf('?') >= 0 ? '&' : '?';
+                    var imgUrl = occImageBase + sep + 't=' + (meta.mtime != null ? String(meta.mtime) : '0');
                     L.imageOverlay(imgUrl, fullBounds, {
                         opacity: 1,
                         interactive: false,
