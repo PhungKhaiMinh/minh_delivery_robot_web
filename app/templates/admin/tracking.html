@@ -475,9 +475,9 @@
                                     }
                                     latlngs.forEach(function (q) {
                                         L.circleMarker(q.ll, {
-                                            radius: 5,
+                                            radius: 8,
                                             color: '#b45309',
-                                            weight: 2,
+                                            weight: 2.5,
                                             fillColor: '#fbbf24',
                                             fillOpacity: 0.95,
                                         }).addTo(avoidWpLayer).bindPopup(
@@ -866,16 +866,16 @@
                     if (!c || c.x == null || c.y == null) return;
                     var ll = rtabGraphAlignWorldToMapLL(Number(c.x), Number(c.y), b);
                     var m = L.circleMarker(ll, {
-                        radius: self.graphEditMode ? 8 : 5,
+                        radius: self.graphEditMode ? 12 : 9,
                         fillColor: '#7c3aed',
                         color: '#fff',
-                        weight: 2,
+                        weight: 2.5,
                         fillOpacity: 0.92,
                     }).addTo(wpUserLayer);
                     m.bindTooltip(String(w.name || w.id), {
                         permanent: true,
                         direction: 'top',
-                        offset: [0, -6],
+                        offset: [0, -10],
                         className: 'border-0 bg-violet-900/90 text-white text-[10px] px-1 py-0.5 rounded shadow',
                     });
                     if (self.graphEditMode) {
@@ -928,10 +928,10 @@
                     var pid = String(p.id);
                     var ll = rtabGraphAlignWorldToMapLL(Number(p.x), Number(p.y), b);
                     var pm = L.circleMarker(ll, {
-                        radius: self.graphEditMode ? 7 : 4,
+                        radius: self.graphEditMode ? 11 : 8,
                         fillColor: '#fdba74',
                         color: '#c2410c',
-                        weight: 2,
+                        weight: 2.5,
                         fillOpacity: 0.88,
                     }).addTo(wpUserLayer);
                     if (self.graphEditMode) {
