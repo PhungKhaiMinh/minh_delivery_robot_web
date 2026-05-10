@@ -79,7 +79,7 @@
             Nhấn lại cùng một điểm để hủy bước chọn. <kbd class="px-1 bg-white rounded border text-[10px]">Esc</kbd> xóa lựa chọn.
         </p>
         <p class="text-xs text-violet-700/90 font-medium">
-            Điểm tím (waypoint) và cam (pickup) dùng cùng phép chiếu world → map (mét, trùng pose MQTT và bounds PGM/map.yaml).
+            Điểm tím (waypoint) và cam (pickup) dùng cùng phép chiếu world → map với pose MQTT (lật Y giống layer trước đây).
         </p>
         <p class="text-xs font-medium" :class="graphEditMode ? 'text-amber-800' : 'text-slate-500'" x-text="graphHint"></p>
         <div class="flex flex-wrap gap-2">
@@ -137,7 +137,7 @@
         <pre class="text-[11px] font-mono bg-white/90 border border-amber-100 rounded-lg p-3 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap" x-text="avoidJsonPretty || '— (chưa nhận payload)'"></pre>
     </div>
 
-    <p class="text-xs text-slate-400">Pose: <code>{"x":0.0,"y":0.0,"yaw":0.0}</code> — cùng hệ mét với map; yaw ROS (rad, CCW từ +X) được quy đổi sang hướng vẽ trên map (đông = +X, bắc = +Y).</p>
+    <p class="text-xs text-slate-400">Pose: <code>{"x":0.0,"y":0.0,"yaw":0.0}</code> — rad, CCW từ +X (Đông); icon hướng Bắc=0°; lật Y map như waypoint.</p>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -177,17 +177,26 @@
     }
 
     function worldToMapLatLng(wx, wy, b) {
-        return L.latLng(b.ymax - wy, wx - b.xmin);
+        var xmin = Number(b.xmin), ymax = Number(b.ymax);
+        return L.latLng(ymax - wy, wx - xmin);
     }
 
-    /** Đảo ngược worldToMapLatLng — cùng hệ mét với bounds PGM / map.yaml (ROS). */
-    function mapLatLngToWorld(ll, b) {
-        return [ll.lng + b.xmin, b.ymax - ll.lat];
+    function graphDisplayWorldY(wy, bb) {
+        var ymin = Number(bb.ymin), ymax = Number(bb.ymax);
+        return ymin + ymax - wy;
     }
 
     function haversineMeters(a, b) {
         var dx = a[0] - b[0], dy = a[1] - b[1];
         return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function mapGraphAlignedLatLngToWorld(ll, bb) {
+        return [ll.lng + Number(bb.xmin), ll.lat + Number(bb.ymin)];
+    }
+
+    function rtabGraphAlignWorldToMapLL(wx, wy, bb) {
+        return worldToMapLatLng(wx, graphDisplayWorldY(wy, bb), bb);
     }
 
     function normalizeWpEdge(x) {
@@ -230,7 +239,7 @@
 
         function poseToMapLL(nx, ny) {
             if (!graphBounds) return null;
-            return worldToMapLatLng(nx, ny, graphBounds);
+            return rtabGraphAlignWorldToMapLL(nx, ny, graphBounds);
         }
 
         return {
@@ -390,8 +399,12 @@
                                 self.poseY = ny.toFixed(4);
                                 self.poseYaw = yw != null ? yw.toFixed(4) : '—';
 
-                                // ROS yaw: quay CCW quanh +X; map: +X phải, +Y lên. Icon mặc định 0° = hướng lên (+Y) → cần 90° - yaw (độ).
-                                var deg = yw != null ? (90 - (yw * 180 / Math.PI)) : null;
+                                var deg = null;
+                                if (yw != null) {
+                                    // Pose yaw: radian, CCW từ +X (Đông, ENU). Icon SVG 0° = Bắc (lên).
+                                    // Chuyển: góc hiển thị so với Bắc = 90° − yaw_deg = −yaw_deg + 90°.
+                                    deg = -(yw * 180 / Math.PI) + 90;
+                                }
                                 currentHeadingDeg = deg;
                                 updateRobotIcon();
 
@@ -405,9 +418,9 @@
                                 if (!ll || !trailLine) return;
 
                                 var dominated = false;
-                                if (trailCoords.length > 0 && graphBounds) {
+                                if (trailCoords.length > 0 && b) {
                                     var prev = trailCoords[trailCoords.length - 1];
-                                    var pw = mapLatLngToWorld(prev, graphBounds);
+                                    var pw = mapGraphAlignedLatLngToWorld(prev, b);
                                     var d = haversineMeters(pw, [nx, ny]);
                                     if (d < MIN_TRAIL_DIST) dominated = true;
                                 }
@@ -439,11 +452,40 @@
                     }
                     graphBounds = meta.bounds;
                     b = graphBounds;
+                    var bbRaw = graphBounds;
+                    var xmin = Number(bbRaw.xmin);
+                    var ymin = Number(bbRaw.ymin);
+                    var xmax = Number(bbRaw.xmax);
+                    var ymax = Number(bbRaw.ymax);
+                    if ([xmin, ymin, xmax, ymax].some(function (v) { return isNaN(v); })) {
+                        self.graphErr = 'bounds meta không hợp lệ (NaN)';
+                        return;
+                    }
+                    var resM = Number(meta.resolution);
+                    var gw = Number(meta.width);
+                    var gh = Number(meta.height);
+                    var wM = Math.abs(xmax - xmin);
+                    var hM = Math.abs(ymax - ymin);
+                    if (resM > 0 && gw > 0 && gh > 0) {
+                        var wFix = gw * resM;
+                        var hFix = gh * resM;
+                        var tol = resM * 2;
+                        if (Math.abs(wFix - wM) > tol) {
+                            xmax = xmin + wFix;
+                            wM = wFix;
+                        }
+                        if (Math.abs(hFix - hM) > tol) {
+                            ymax = ymin + hFix;
+                            hM = hFix;
+                        }
+                    }
+                    graphBounds = { xmin: xmin, ymin: ymin, xmax: xmax, ymax: ymax };
+                    b = graphBounds;
                     self.graphErr = '';
                     self.graphMeta = meta.message || '';
                     var bb = graphBounds;
-                    var h = bb.ymax - bb.ymin;
-                    var w = bb.xmax - bb.xmin;
+                    var h = Math.abs(Number(bb.ymax) - Number(bb.ymin));
+                    var w = Math.abs(Number(bb.xmax) - Number(bb.xmin));
 
                     map = L.map('admin-map', {
                         crs: L.CRS.Simple,
@@ -459,7 +501,7 @@
                     map.attributionControl.setPrefix('');
                     map.attributionControl.addAttribution('Occupancy map (.pgm → PNG, mét)');
 
-                    var fullBounds = L.latLngBounds(L.latLng(h, 0), L.latLng(0, w));
+                    var fullBounds = L.latLngBounds(L.latLng(0, 0), L.latLng(h, w));
                     var imgUrl = occImageBase + '?t=' + (meta.mtime != null ? String(meta.mtime) : '0');
                     L.imageOverlay(imgUrl, fullBounds, {
                         opacity: 1,
@@ -480,7 +522,7 @@
 
                     var cx = (bb.xmin + bb.xmax) / 2;
                     var cy = (bb.ymin + bb.ymax) / 2;
-                    var startLL = worldToMapLatLng(cx, cy, bb);
+                    var startLL = rtabGraphAlignWorldToMapLL(cx, cy, bb);
                     robotMarker = L.marker(startLL, {
                         icon: L.divIcon({
                             className: '',
@@ -721,7 +763,7 @@
                     wpById[wid] = w;
                     var c = w.center;
                     if (!c || c.x == null || c.y == null) return;
-                    var ll = worldToMapLatLng(Number(c.x), Number(c.y), b);
+                    var ll = rtabGraphAlignWorldToMapLL(Number(c.x), Number(c.y), b);
                     var m = L.circleMarker(ll, {
                         radius: self.graphEditMode ? 8 : 5,
                         fillColor: '#7c3aed',
@@ -756,8 +798,8 @@
                     if (!wa || !wb || !wa.center || !wb.center) return;
                     L.polyline(
                         [
-                            worldToMapLatLng(Number(wa.center.x), Number(wa.center.y), b),
-                            worldToMapLatLng(Number(wb.center.x), Number(wb.center.y), b),
+                            rtabGraphAlignWorldToMapLL(Number(wa.center.x), Number(wa.center.y), b),
+                            rtabGraphAlignWorldToMapLL(Number(wb.center.x), Number(wb.center.y), b),
                         ],
                         { color: '#7c3aed', weight: 3, opacity: 0.78, lineCap: 'round' }
                     ).addTo(wpEdgeLayer);
@@ -768,8 +810,8 @@
                     if (!pu || !wa || pu.x == null || pu.y == null || !wa.center) return;
                     L.polyline(
                         [
-                            worldToMapLatLng(Number(pu.x), Number(pu.y), b),
-                            worldToMapLatLng(Number(wa.center.x), Number(wa.center.y), b),
+                            rtabGraphAlignWorldToMapLL(Number(pu.x), Number(pu.y), b),
+                            rtabGraphAlignWorldToMapLL(Number(wa.center.x), Number(wa.center.y), b),
                         ],
                         {
                             color: '#ea580c',
@@ -783,7 +825,7 @@
                 (this.pickupsRaw || []).forEach(function (p) {
                     if (p.x == null || p.y == null) return;
                     var pid = String(p.id);
-                    var ll = worldToMapLatLng(Number(p.x), Number(p.y), b);
+                    var ll = rtabGraphAlignWorldToMapLL(Number(p.x), Number(p.y), b);
                     var pm = L.circleMarker(ll, {
                         radius: self.graphEditMode ? 7 : 4,
                         fillColor: '#fdba74',
