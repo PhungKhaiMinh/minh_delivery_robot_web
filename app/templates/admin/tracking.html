@@ -136,17 +136,26 @@
     <div class="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 space-y-2" x-show="mapReady">
         <h2 class="text-sm font-bold text-amber-900">Né vật cản — <span class="font-mono text-xs text-amber-800" x-text="topicAvoidLabel"></span></h2>
         <p class="text-xs text-amber-900/90 leading-relaxed">
-            <strong>Tiếng Việt:</strong> <code class="text-[10px]">wp_x</code>/<code class="text-[10px]">wp_y</code> mặc định là tọa độ <strong>map / world (mét)</strong>, vẽ giống waypoint dataset &amp; pickup (cùng hàm chiếu).
-            Chỉ khi đúng là tọa độ <strong>base_link</strong> quanh robot, hãy gửi thêm <code class="text-[10px]">robot_relative: true</code> hoặc <code class="text-[10px]">in_base_link: true</code>, hoặc <code class="text-[10px]">frame_id</code> (vd. <code class="text-[10px]">base_link</code>).
-            <strong>English:</strong> By default, avoidance points are treated as <strong>map-frame meters</strong> like the waypoint graph. Set <code class="text-[10px]">robot_relative</code>/<code class="text-[10px]">in_base_link</code> or a <code class="text-[10px]">base_*</code> <code class="text-[10px]">frame_id</code> only if the numbers are truly in the robot body frame.
-            Realtime polyline + markers; layer clears when you leave this page.
+            <strong>Tiếng Việt:</strong> Khối JSON bên dưới cập nhật <strong>theo realtime</strong> mỗi khi có tin MQTT. Đường cam + điểm trên map chỉ đổi khi bạn nhấn <strong>«Cập nhật lên map &amp; lưu»</strong> (lưu <code class="text-[10px]">localStorage</code>).
+            Mở lại trang: map vẽ lại từ bản đã lưu; không nhấn nút thì không ghi đè bản cũ.
+            <code class="text-[10px]">wp_x</code>/<code class="text-[10px]">wp_y</code> mặc định là map (mét) giống dataset; chỉ thêm <code class="text-[10px]">robot_relative</code> / <code class="text-[10px]">frame_id</code> base_* nếu đúng là base_link.
+            <strong>English:</strong> JSON tracks live MQTT; the map updates only when you click <strong>Apply latest to map &amp; save</strong> (browser storage). Reload redraws the saved snapshot. Coordinates default to map frame like waypoints.
         </p>
-        <div class="flex flex-wrap gap-4 text-xs text-amber-950">
+        <div class="flex flex-wrap gap-4 text-xs text-amber-950 items-center">
             <span><strong>has_waypoint</strong>: <span class="font-mono" x-text="avoidHasWaypoint === null ? '—' : avoidHasWaypoint"></span></span>
             <span><strong>has_avoid_obstacles</strong>: <span class="font-mono" x-text="avoidHasObstacles === null ? '—' : avoidHasObstacles"></span></span>
-            <span><strong>Số điểm</strong>: <span class="font-mono" x-text="avoidWpCount"></span></span>
-            <span class="text-amber-800" x-show="avoidLastAt">Cập nhật: <span x-text="avoidLastAt"></span></span>
+            <span><strong>Số điểm trên map</strong>: <span class="font-mono" x-text="avoidWpCount"></span></span>
+            <span class="text-amber-800" x-show="avoidLastAt">MQTT nhận: <span x-text="avoidLastAt"></span></span>
         </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <button type="button" @click="commitLatestAvoidanceFromTopic()"
+                class="px-3 py-2 rounded-lg text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 shadow-sm">
+                Cập nhật lên map &amp; lưu / Apply latest to map &amp; save
+            </button>
+        </div>
+        <p class="text-xs text-emerald-800 font-medium min-h-[1.25rem]" x-show="avoidCommitOk" x-text="avoidCommitOk"></p>
+        <p class="text-xs text-red-600 min-h-[1.25rem]" x-show="avoidCommitErr" x-text="avoidCommitErr"></p>
+        <p class="text-xs text-amber-900/90 min-h-[1.25rem]" x-show="avoidDisplayedAt" x-text="avoidDisplayedAt"></p>
         <pre class="text-[11px] font-mono bg-white/90 border border-amber-100 rounded-lg p-3 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap" x-text="avoidJsonPretty || '— (chưa nhận payload)'"></pre>
     </div>
 
@@ -157,6 +166,8 @@
 <script>
 (function () {
     var CONE_SIZE = 60;
+    /** Snapshot JSON trong localStorage: { v, savedAt, payload } */
+    var AVOID_SNAPSHOT_LS_KEY = 'admin_tracking_avoidance_waypoint_snapshot_v1';
 
     function makeRobotSvg(headingDeg) {
         var r = 9;
@@ -334,6 +345,10 @@
             avoidWpCount: 0,
             avoidLastAt: '',
             avoidJsonPretty: '',
+            avoidDisplayedAt: '',
+            avoidCommitErr: '',
+            avoidCommitOk: '',
+            avoidTopicLatestAw: null,
             occMapsList: [],
             occMapSelect: occMapIdSel,
             occMapsListing: true,
@@ -413,77 +428,9 @@
                                 if (t === topicAvoidanceWp) {
                                     var rawAw = msg.toString();
                                     var aw = window.AdminMqtt.safeParseJson(rawAw);
+                                    self.avoidTopicLatestAw = aw && typeof aw === 'object' ? aw : null;
                                     self.avoidJsonPretty = aw ? JSON.stringify(aw, null, 2) : rawAw;
                                     self.avoidLastAt = new Date().toLocaleTimeString('vi-VN');
-                                    if (avoidWpLayer) avoidWpLayer.clearLayers();
-                                    if (!aw || typeof aw !== 'object') {
-                                        self.avoidHasWaypoint = null;
-                                        self.avoidHasObstacles = null;
-                                        self.avoidWpCount = 0;
-                                        return;
-                                    }
-                                    if (aw.has_waypoint !== undefined && aw.has_waypoint !== null) {
-                                        self.avoidHasWaypoint = Boolean(aw.has_waypoint);
-                                    } else {
-                                        self.avoidHasWaypoint = null;
-                                    }
-                                    var ho = aw.has_avoid_obstacles;
-                                    if (ho === undefined || ho === null) ho = aw.has_obstacles;
-                                    if (ho !== undefined && ho !== null) {
-                                        self.avoidHasObstacles = Boolean(ho);
-                                    } else {
-                                        self.avoidHasObstacles = null;
-                                    }
-                                    var path = avoidanceExtractPathArrays(aw);
-                                    if (!path) {
-                                        self.avoidWpCount = 0;
-                                        return;
-                                    }
-                                    var xs = path.xs, ys = path.ys;
-                                    var n = Math.min(xs.length, ys.length);
-                                    self.avoidWpCount = n;
-                                    if (n === 0 || !avoidWpLayer) {
-                                        return;
-                                    }
-                                    var bb = graphBounds;
-                                    if (!bb) {
-                                        return;
-                                    }
-                                    var toMap = avoidanceShouldTransformToMap(aw);
-                                    var latlngs = [];
-                                    for (var ai = 0; ai < n; ai++) {
-                                        var lx = Number(xs[ai]), ly = Number(ys[ai]);
-                                        if (isNaN(lx) || isNaN(ly)) continue;
-                                        var wx = lx, wy = ly;
-                                        if (toMap && lastPoseWorld) {
-                                            var wpt = avoidanceLocalToWorldMeters(lx, ly, lastPoseWorld);
-                                            wx = wpt.wx;
-                                            wy = wpt.wy;
-                                        }
-                                        var all = rtabGraphAlignWorldToMapLL(wx, wy, bb);
-                                        if (all) latlngs.push({ ll: all, ax: wx, ay: wy });
-                                    }
-                                    if (latlngs.length > 1) {
-                                        L.polyline(latlngs.map(function (q) { return q.ll; }), {
-                                            color: '#d97706',
-                                            weight: 3,
-                                            opacity: 0.9,
-                                            dashArray: '10,8',
-                                            lineCap: 'round',
-                                            lineJoin: 'round',
-                                        }).addTo(avoidWpLayer);
-                                    }
-                                    latlngs.forEach(function (q) {
-                                        L.circleMarker(q.ll, {
-                                            radius: 8,
-                                            color: '#b45309',
-                                            weight: 2.5,
-                                            fillColor: '#fbbf24',
-                                            fillOpacity: 0.95,
-                                        }).addTo(avoidWpLayer).bindPopup(
-                                            '<div class="text-xs font-mono">né vật cản<br>x=' + q.ax.toFixed(4) + ' y=' + q.ay.toFixed(4) + ' m</div>'
-                                        );
-                                    });
                                     return;
                                 }
                                 if (t !== topicPose) return;
@@ -529,6 +476,9 @@
                                     self.trailCount = trailCoords.length;
                                 }
                             });
+                            self._restoreAvoidanceSnapshotFromStorage();
+                        } else {
+                            self._restoreAvoidanceSnapshotFromStorage();
                         }
                     };
 
@@ -850,6 +800,123 @@
                 } finally {
                     self.graphLoading = false;
                 }
+            },
+
+            _applyAvoidanceSnapshotToMap: function (aw) {
+                var self = this;
+                self.avoidCommitErr = '';
+                if (avoidWpLayer) avoidWpLayer.clearLayers();
+                if (!aw || typeof aw !== 'object') {
+                    self.avoidHasWaypoint = null;
+                    self.avoidHasObstacles = null;
+                    self.avoidWpCount = 0;
+                    return;
+                }
+                if (aw.has_waypoint !== undefined && aw.has_waypoint !== null) {
+                    self.avoidHasWaypoint = Boolean(aw.has_waypoint);
+                } else {
+                    self.avoidHasWaypoint = null;
+                }
+                var ho = aw.has_avoid_obstacles;
+                if (ho === undefined || ho === null) ho = aw.has_obstacles;
+                if (ho !== undefined && ho !== null) {
+                    self.avoidHasObstacles = Boolean(ho);
+                } else {
+                    self.avoidHasObstacles = null;
+                }
+                var path = avoidanceExtractPathArrays(aw);
+                if (!path) {
+                    self.avoidWpCount = 0;
+                    return;
+                }
+                var xs = path.xs, ys = path.ys;
+                var n = Math.min(xs.length, ys.length);
+                self.avoidWpCount = n;
+                if (n === 0 || !avoidWpLayer) return;
+                var bb = graphBounds;
+                if (!bb) return;
+                var toMap = avoidanceShouldTransformToMap(aw);
+                var latlngs = [];
+                for (var ai = 0; ai < n; ai++) {
+                    var lx = Number(xs[ai]), ly = Number(ys[ai]);
+                    if (isNaN(lx) || isNaN(ly)) continue;
+                    var wx = lx, wy = ly;
+                    if (toMap && lastPoseWorld) {
+                        var wpt = avoidanceLocalToWorldMeters(lx, ly, lastPoseWorld);
+                        wx = wpt.wx;
+                        wy = wpt.wy;
+                    }
+                    var all = rtabGraphAlignWorldToMapLL(wx, wy, bb);
+                    if (all) latlngs.push({ ll: all, ax: wx, ay: wy });
+                }
+                if (latlngs.length > 1) {
+                    L.polyline(latlngs.map(function (q) { return q.ll; }), {
+                        color: '#d97706',
+                        weight: 3,
+                        opacity: 0.9,
+                        dashArray: '10,8',
+                        lineCap: 'round',
+                        lineJoin: 'round',
+                    }).addTo(avoidWpLayer);
+                }
+                latlngs.forEach(function (q) {
+                    L.circleMarker(q.ll, {
+                        radius: 8,
+                        color: '#b45309',
+                        weight: 2.5,
+                        fillColor: '#fbbf24',
+                        fillOpacity: 0.95,
+                    }).addTo(avoidWpLayer).bindPopup(
+                        '<div class="text-xs font-mono">né vật cản<br>x=' + q.ax.toFixed(4) + ' y=' + q.ay.toFixed(4) + ' m</div>'
+                    );
+                });
+            },
+
+            _restoreAvoidanceSnapshotFromStorage: function () {
+                var self = this;
+                self.avoidCommitErr = '';
+                try {
+                    var raw = localStorage.getItem(AVOID_SNAPSHOT_LS_KEY);
+                    if (!raw || !String(raw).trim()) {
+                        self.avoidDisplayedAt = '';
+                        return;
+                    }
+                    var wrap = JSON.parse(raw);
+                    if (!wrap || wrap.v !== 1 || !wrap.payload || typeof wrap.payload !== 'object') {
+                        self.avoidDisplayedAt = '';
+                        return;
+                    }
+                    self._applyAvoidanceSnapshotToMap(wrap.payload);
+                    var t = wrap.savedAt ? new Date(wrap.savedAt) : null;
+                    self.avoidDisplayedAt = t && !isNaN(t.getTime())
+                        ? 'Trên map: bản đã lưu lúc ' + t.toLocaleString('vi-VN') + ' (localStorage)'
+                        : 'Trên map: bản đã lưu (localStorage)';
+                } catch (e) {
+                    self.avoidDisplayedAt = '';
+                    self.avoidCommitErr = 'Không đọc được snapshot đã lưu. / Invalid saved snapshot.';
+                }
+            },
+
+            commitLatestAvoidanceFromTopic: function () {
+                var self = this;
+                self.avoidCommitErr = '';
+                self.avoidCommitOk = '';
+                var aw = self.avoidTopicLatestAw;
+                if (!aw || typeof aw !== 'object') {
+                    self.avoidCommitErr = 'Chưa có tin MQTT từ topic (đợi robot publish). / No MQTT message received yet.';
+                    return;
+                }
+                try {
+                    var wrap = { v: 1, savedAt: Date.now(), payload: aw };
+                    localStorage.setItem(AVOID_SNAPSHOT_LS_KEY, JSON.stringify(wrap));
+                } catch (e) {
+                    self.avoidCommitErr = (e && e.message) ? String(e.message) : 'Không ghi được localStorage.';
+                    return;
+                }
+                self._applyAvoidanceSnapshotToMap(aw);
+                self.avoidDisplayedAt = 'Trên map: bản vừa cập nhật lúc ' + new Date().toLocaleString('vi-VN');
+                self.avoidCommitOk = 'Đã vẽ và lưu bản mới nhất. / Snapshot saved.';
+                setTimeout(function () { self.avoidCommitOk = ''; }, 4500);
             },
 
             _renderUserGraphLayers: function () {
