@@ -136,10 +136,9 @@
     <div class="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 space-y-2" x-show="mapReady">
         <h2 class="text-sm font-bold text-amber-900">Né vật cản — <span class="font-mono text-xs text-amber-800" x-text="topicAvoidLabel"></span></h2>
         <p class="text-xs text-amber-900/90 leading-relaxed">
-            <strong>Tiếng Việt:</strong> Khối JSON bên dưới cập nhật <strong>theo realtime</strong> mỗi khi có tin MQTT. Đường cam + điểm trên map chỉ đổi khi bạn nhấn <strong>«Cập nhật lên map &amp; lưu»</strong> (lưu <code class="text-[10px]">localStorage</code>).
-            Mở lại trang: map vẽ lại từ bản đã lưu; không nhấn nút thì không ghi đè bản cũ.
-            <code class="text-[10px]">wp_x</code>/<code class="text-[10px]">wp_y</code> mặc định là map (mét) giống dataset; chỉ thêm <code class="text-[10px]">robot_relative</code> / <code class="text-[10px]">frame_id</code> base_* nếu đúng là base_link.
-            <strong>English:</strong> JSON tracks live MQTT; the map updates only when you click <strong>Apply latest to map &amp; save</strong> (browser storage). Reload redraws the saved snapshot. Coordinates default to map frame like waypoints.
+            <strong>Tiếng Việt:</strong> Map và JSON cập nhật <strong>liên tục</strong> theo MQTT. Nếu tin mới <strong>không có điểm</strong> (rỗng / không parse được / thiếu <code class="text-[10px]">wp_x</code>/<code class="text-[10px]">wp_y</code> hợp lệ), map vẫn giữ <strong>bản có điểm gần nhất</strong> vừa nhận trước đó.
+            <code class="text-[10px]">wp_x</code>/<code class="text-[10px]">wp_y</code> mặc định là map (mét) giống dataset; dùng <code class="text-[10px]">robot_relative</code> / <code class="text-[10px]">frame_id</code> base_* nếu là base_link.
+            <strong>English:</strong> Live updates from the topic; when a message has no drawable path, the map keeps showing the <strong>last good</strong> path until a valid one arrives.
         </p>
         <div class="flex flex-wrap gap-4 text-xs text-amber-950 items-center">
             <span><strong>has_waypoint</strong>: <span class="font-mono" x-text="avoidHasWaypoint === null ? '—' : avoidHasWaypoint"></span></span>
@@ -147,15 +146,6 @@
             <span><strong>Số điểm trên map</strong>: <span class="font-mono" x-text="avoidWpCount"></span></span>
             <span class="text-amber-800" x-show="avoidLastAt">MQTT nhận: <span x-text="avoidLastAt"></span></span>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
-            <button type="button" @click="commitLatestAvoidanceFromTopic()"
-                class="px-3 py-2 rounded-lg text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 shadow-sm">
-                Cập nhật lên map &amp; lưu / Apply latest to map &amp; save
-            </button>
-        </div>
-        <p class="text-xs text-emerald-800 font-medium min-h-[1.25rem]" x-show="avoidCommitOk" x-text="avoidCommitOk"></p>
-        <p class="text-xs text-red-600 min-h-[1.25rem]" x-show="avoidCommitErr" x-text="avoidCommitErr"></p>
-        <p class="text-xs text-amber-900/90 min-h-[1.25rem]" x-show="avoidDisplayedAt" x-text="avoidDisplayedAt"></p>
         <pre class="text-[11px] font-mono bg-white/90 border border-amber-100 rounded-lg p-3 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap" x-text="avoidJsonPretty || '— (chưa nhận payload)'"></pre>
     </div>
 
@@ -166,8 +156,6 @@
 <script>
 (function () {
     var CONE_SIZE = 60;
-    /** Snapshot JSON trong localStorage: { v, savedAt, payload } */
-    var AVOID_SNAPSHOT_LS_KEY = 'admin_tracking_avoidance_waypoint_snapshot_v1';
 
     function makeRobotSvg(headingDeg) {
         var r = 9;
@@ -345,10 +333,6 @@
             avoidWpCount: 0,
             avoidLastAt: '',
             avoidJsonPretty: '',
-            avoidDisplayedAt: '',
-            avoidCommitErr: '',
-            avoidCommitOk: '',
-            avoidTopicLatestAw: null,
             occMapsList: [],
             occMapSelect: occMapIdSel,
             occMapsListing: true,
@@ -402,6 +386,7 @@
 
                     var b = null;
                     var installTrackingMqtt = function () {
+                        var lastGoodAvoidanceAw = null;
                         self._clearAvoidanceOnLeave = function () {
                             if (avoidWpLayer) avoidWpLayer.clearLayers();
                             self.avoidHasWaypoint = null;
@@ -428,9 +413,20 @@
                                 if (t === topicAvoidanceWp) {
                                     var rawAw = msg.toString();
                                     var aw = window.AdminMqtt.safeParseJson(rawAw);
-                                    self.avoidTopicLatestAw = aw && typeof aw === 'object' ? aw : null;
                                     self.avoidJsonPretty = aw ? JSON.stringify(aw, null, 2) : rawAw;
                                     self.avoidLastAt = new Date().toLocaleTimeString('vi-VN');
+                                    var path = avoidanceExtractPathArrays(aw);
+                                    var n = path ? Math.min(path.xs.length, path.ys.length) : 0;
+                                    if (aw && typeof aw === 'object' && n > 0) {
+                                        lastGoodAvoidanceAw = aw;
+                                        self._applyAvoidanceSnapshotToMap(aw);
+                                    } else {
+                                        if (lastGoodAvoidanceAw) {
+                                            self._applyAvoidanceSnapshotToMap(lastGoodAvoidanceAw);
+                                        } else {
+                                            self._applyAvoidanceSnapshotToMap(null);
+                                        }
+                                    }
                                     return;
                                 }
                                 if (t !== topicPose) return;
@@ -476,9 +472,6 @@
                                     self.trailCount = trailCoords.length;
                                 }
                             });
-                            self._restoreAvoidanceSnapshotFromStorage();
-                        } else {
-                            self._restoreAvoidanceSnapshotFromStorage();
                         }
                     };
 
@@ -804,7 +797,6 @@
 
             _applyAvoidanceSnapshotToMap: function (aw) {
                 var self = this;
-                self.avoidCommitErr = '';
                 if (avoidWpLayer) avoidWpLayer.clearLayers();
                 if (!aw || typeof aw !== 'object') {
                     self.avoidHasWaypoint = null;
@@ -870,53 +862,6 @@
                         '<div class="text-xs font-mono">né vật cản<br>x=' + q.ax.toFixed(4) + ' y=' + q.ay.toFixed(4) + ' m</div>'
                     );
                 });
-            },
-
-            _restoreAvoidanceSnapshotFromStorage: function () {
-                var self = this;
-                self.avoidCommitErr = '';
-                try {
-                    var raw = localStorage.getItem(AVOID_SNAPSHOT_LS_KEY);
-                    if (!raw || !String(raw).trim()) {
-                        self.avoidDisplayedAt = '';
-                        return;
-                    }
-                    var wrap = JSON.parse(raw);
-                    if (!wrap || wrap.v !== 1 || !wrap.payload || typeof wrap.payload !== 'object') {
-                        self.avoidDisplayedAt = '';
-                        return;
-                    }
-                    self._applyAvoidanceSnapshotToMap(wrap.payload);
-                    var t = wrap.savedAt ? new Date(wrap.savedAt) : null;
-                    self.avoidDisplayedAt = t && !isNaN(t.getTime())
-                        ? 'Trên map: bản đã lưu lúc ' + t.toLocaleString('vi-VN') + ' (localStorage)'
-                        : 'Trên map: bản đã lưu (localStorage)';
-                } catch (e) {
-                    self.avoidDisplayedAt = '';
-                    self.avoidCommitErr = 'Không đọc được snapshot đã lưu. / Invalid saved snapshot.';
-                }
-            },
-
-            commitLatestAvoidanceFromTopic: function () {
-                var self = this;
-                self.avoidCommitErr = '';
-                self.avoidCommitOk = '';
-                var aw = self.avoidTopicLatestAw;
-                if (!aw || typeof aw !== 'object') {
-                    self.avoidCommitErr = 'Chưa có tin MQTT từ topic (đợi robot publish). / No MQTT message received yet.';
-                    return;
-                }
-                try {
-                    var wrap = { v: 1, savedAt: Date.now(), payload: aw };
-                    localStorage.setItem(AVOID_SNAPSHOT_LS_KEY, JSON.stringify(wrap));
-                } catch (e) {
-                    self.avoidCommitErr = (e && e.message) ? String(e.message) : 'Không ghi được localStorage.';
-                    return;
-                }
-                self._applyAvoidanceSnapshotToMap(aw);
-                self.avoidDisplayedAt = 'Trên map: bản vừa cập nhật lúc ' + new Date().toLocaleString('vi-VN');
-                self.avoidCommitOk = 'Đã vẽ và lưu bản mới nhất. / Snapshot saved.';
-                setTimeout(function () { self.avoidCommitOk = ''; }, 4500);
             },
 
             _renderUserGraphLayers: function () {
