@@ -136,9 +136,10 @@
     <div class="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 space-y-2" x-show="mapReady">
         <h2 class="text-sm font-bold text-amber-900">Né vật cản — <span class="font-mono text-xs text-amber-800" x-text="topicAvoidLabel"></span></h2>
         <p class="text-xs text-amber-900/90 leading-relaxed">
-            <strong>Tiếng Việt:</strong> Map và JSON cập nhật <strong>liên tục</strong> theo MQTT. Nếu tin mới <strong>không có điểm</strong> (rỗng / không parse được / thiếu <code class="text-[10px]">wp_x</code>/<code class="text-[10px]">wp_y</code> hợp lệ), map vẫn giữ <strong>bản có điểm gần nhất</strong> vừa nhận trước đó.
-            <code class="text-[10px]">wp_x</code>/<code class="text-[10px]">wp_y</code> mặc định là map (mét) giống dataset; dùng <code class="text-[10px]">robot_relative</code> / <code class="text-[10px]">frame_id</code> base_* nếu là base_link.
-            <strong>English:</strong> Live updates from the topic; when a message has no drawable path, the map keeps showing the <strong>last good</strong> path until a valid one arrives.
+            <strong>Tiếng Việt:</strong> Map và JSON cập nhật <strong>liên tục</strong> theo MQTT. Tin <strong>không có điểm</strong> → map giữ bản có điểm gần nhất trong phiên.
+            Mỗi khi nhận payload hợp lệ, hệ thống <strong>lưu vào localStorage</strong> trình duyệt; thoát rồi vào lại Tracking sẽ <strong>khôi phục</strong> lên map và ô JSON.
+            <code class="text-[10px]">wp_x</code>/<code class="text-[10px]">wp_y</code> mặc định là map (mét); dùng <code class="text-[10px]">robot_relative</code> / <code class="text-[10px]">frame_id</code> base_* nếu là base_link.
+            <strong>English:</strong> Live MQTT updates; empty messages keep the last in-session path; each valid path is saved in the browser so a return visit restores the latest avoidance waypoints.
         </p>
         <div class="flex flex-wrap gap-4 text-xs text-amber-950 items-center">
             <span><strong>has_waypoint</strong>: <span class="font-mono" x-text="avoidHasWaypoint === null ? '—' : avoidHasWaypoint"></span></span>
@@ -146,6 +147,7 @@
             <span><strong>Số điểm trên map</strong>: <span class="font-mono" x-text="avoidWpCount"></span></span>
             <span class="text-amber-800" x-show="avoidLastAt">MQTT nhận: <span x-text="avoidLastAt"></span></span>
         </div>
+        <p class="text-xs text-amber-800 min-h-[1.25rem]" x-show="avoidStoredLabel" x-text="avoidStoredLabel"></p>
         <pre class="text-[11px] font-mono bg-white/90 border border-amber-100 rounded-lg p-3 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap" x-text="avoidJsonPretty || '— (chưa nhận payload)'"></pre>
     </div>
 
@@ -156,6 +158,8 @@
 <script>
 (function () {
     var CONE_SIZE = 60;
+    /** Bản né vật cản có điểm gần nhất (localStorage, trình duyệt). */
+    var AVOID_LAST_GOOD_LS_KEY = 'admin_tracking_avoidance_waypoint_last_good_v1';
 
     function makeRobotSvg(headingDeg) {
         var r = 9;
@@ -231,6 +235,33 @@
             if (xa.length) return { xs: xa, ys: ya };
         }
         return null;
+    }
+
+    function avoidanceDrawablePointCount(aw) {
+        var path = avoidanceExtractPathArrays(aw);
+        if (!path) return 0;
+        return Math.min(path.xs.length, path.ys.length);
+    }
+
+    function persistAvoidanceLastGood(aw) {
+        try {
+            localStorage.setItem(
+                AVOID_LAST_GOOD_LS_KEY,
+                JSON.stringify({ v: 1, savedAt: Date.now(), payload: aw })
+            );
+        } catch (e) { /* quota / private mode */ }
+    }
+
+    function loadAvoidanceLastGoodRecord() {
+        try {
+            var raw = localStorage.getItem(AVOID_LAST_GOOD_LS_KEY);
+            if (!raw || !String(raw).trim()) return null;
+            var wrap = JSON.parse(raw);
+            if (!wrap || wrap.v !== 1 || !wrap.payload || typeof wrap.payload !== 'object') return null;
+            return { savedAt: wrap.savedAt != null ? wrap.savedAt : null, payload: wrap.payload };
+        } catch (e) {
+            return null;
+        }
     }
 
     /**
@@ -333,6 +364,7 @@
             avoidWpCount: 0,
             avoidLastAt: '',
             avoidJsonPretty: '',
+            avoidStoredLabel: '',
             occMapsList: [],
             occMapSelect: occMapIdSel,
             occMapsListing: true,
@@ -394,6 +426,7 @@
                             self.avoidWpCount = 0;
                             self.avoidLastAt = '';
                             self.avoidJsonPretty = '';
+                            self.avoidStoredLabel = '';
                         };
                         window.addEventListener('pagehide', self._clearAvoidanceOnLeave);
 
@@ -415,10 +448,11 @@
                                     var aw = window.AdminMqtt.safeParseJson(rawAw);
                                     self.avoidJsonPretty = aw ? JSON.stringify(aw, null, 2) : rawAw;
                                     self.avoidLastAt = new Date().toLocaleTimeString('vi-VN');
-                                    var path = avoidanceExtractPathArrays(aw);
-                                    var n = path ? Math.min(path.xs.length, path.ys.length) : 0;
+                                    var n = avoidanceDrawablePointCount(aw);
                                     if (aw && typeof aw === 'object' && n > 0) {
                                         lastGoodAvoidanceAw = aw;
+                                        persistAvoidanceLastGood(aw);
+                                        self.avoidStoredLabel = '';
                                         self._applyAvoidanceSnapshotToMap(aw);
                                     } else {
                                         if (lastGoodAvoidanceAw) {
@@ -472,6 +506,20 @@
                                     self.trailCount = trailCoords.length;
                                 }
                             });
+                        }
+                        var rec = loadAvoidanceLastGoodRecord();
+                        if (rec && rec.payload && avoidanceDrawablePointCount(rec.payload) > 0) {
+                            lastGoodAvoidanceAw = rec.payload;
+                            self._applyAvoidanceSnapshotToMap(rec.payload);
+                            self.avoidJsonPretty = JSON.stringify(rec.payload, null, 2);
+                            var sa = rec.savedAt;
+                            if (sa != null) {
+                                var dtr = new Date(sa);
+                                if (!isNaN(dtr.getTime())) {
+                                    self.avoidStoredLabel =
+                                        'Khôi phục bản lưu gần nhất: ' + dtr.toLocaleString('vi-VN') + ' (localStorage)';
+                                }
+                            }
                         }
                     };
 
