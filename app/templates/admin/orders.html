@@ -7,7 +7,7 @@
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
             <h1 class="text-2xl font-bold text-slate-900">Orders</h1>
-            <p class="text-sm text-slate-500 mt-1">Đơn trạng thái Pending hoặc Shipping (pending / confirmed / in_progress)</p>
+            <p class="text-sm text-slate-500 mt-1">Đơn đang chờ, đã xác nhận hoặc đang giao (pending / confirmed / in_progress)</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
             <span x-show="loading" class="text-sm text-sky-600 flex items-center gap-2 order-last sm:order-none w-full sm:w-auto">
@@ -209,7 +209,11 @@
                             <td class="px-4 py-3">
                                 <span
                                     class="inline-flex px-2.5 py-1 rounded-lg text-xs font-semibold"
-                                    :class="row._admin_status_label === 'Pending' ? 'bg-amber-100 text-amber-800' : 'bg-indigo-100 text-indigo-800'"
+                                    :class="{
+                                        'bg-amber-100 text-amber-800': row._admin_status_label === 'Đang chờ',
+                                        'bg-blue-100 text-blue-800': row._admin_status_label === 'Đã xác nhận',
+                                        'bg-indigo-100 text-indigo-800': row._admin_status_label === 'Đang giao',
+                                    }"
                                     x-text="row._admin_status_label"
                                 ></span>
                             </td>
@@ -239,35 +243,9 @@
 <textarea id="pickup-locations-boot" class="hidden" aria-hidden="true">{{ pickup_locations_for_admin|tojson }}</textarea>
 <div class="max-w-7xl mx-auto mt-8 space-y-3" x-data='pickupLocationsEditor({{ pickup_mqtt_cfg|tojson }})'>
     <div>
-        <h2 class="text-xl font-bold text-slate-900">Địa điểm nhận sách — tọa độ local (x, y)</h2>
-        <p class="text-sm text-slate-500 mt-1">
-            Thêm / xóa địa điểm (id, tên) và chỉnh tọa độ <strong>center</strong> (x, y) cùng <strong>margin</strong> (x_margin, y_margin) mét — tương ứng
-            <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x</code> / <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y</code> và
-            <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x_margin</code> / <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y_margin</code> khi publish test thực địa.
-            Danh sách lưu trên server (Firestore hoặc DB local). Form đặt sách client dùng cùng catalog.
-            Lộ trình Dijkstra dùng tọa độ mặt phẳng (m) trên đồ thị Tracking.
-            Nút <strong>Từ pose</strong> gán x, y từ MQTT <code class="text-xs bg-slate-100 px-1 rounded">UGV/localization/pose</code> (cần kết nối MQTT).
-        </p>
+        <h2 class="text-xl font-bold text-slate-900">Địa điểm nhận sách</h2>
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
-        <div class="rounded-xl border border-teal-100 bg-teal-50/50 p-3 space-y-2">
-            <p class="text-xs font-semibold text-teal-900">Pose robot (nút Từ pose) — <span class="font-mono text-teal-800" x-text="topicPose"></span></p>
-            <div class="flex flex-wrap items-center gap-2 text-xs">
-                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium"
-                    :class="{
-                        'bg-emerald-100 text-emerald-800': poseConn === 'connected',
-                        'bg-amber-100 text-amber-800': poseConn === 'reconnecting',
-                        'bg-slate-200 text-slate-600': poseConn === 'disconnected',
-                        'bg-red-100 text-red-800': poseConn === 'error',
-                    }">
-                    <span class="w-1.5 h-1.5 rounded-full" :class="poseConn === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
-                    <span x-text="poseConnLabel"></span>
-                </span>
-                <span class="text-slate-600">x, y:</span>
-                <span class="font-mono text-slate-800 break-all" x-text="poseLiveSummary"></span>
-            </div>
-            <p class="text-[11px] text-red-600 min-h-[1rem]" x-show="poseErr" x-text="poseErr"></p>
-        </div>
         <div class="overflow-x-auto">
             <table class="min-w-full text-sm">
                 <thead class="text-xs text-slate-500 bg-slate-50 border-b border-slate-200">
@@ -358,18 +336,6 @@
     "ugvTopics": robot_status_ugv_topics,
 } %}
 <div class="max-w-7xl mx-auto mt-8 space-y-3" x-data='fieldTestRoutePlanner({{ ftr_cfg|tojson }})'>
-    <div>
-        <h2 class="text-xl font-bold text-slate-900">Kịch bản test thực địa</h2>
-        <p class="text-sm text-slate-500 mt-1">
-            Chọn điểm đầu và điểm cuối từ <strong>Địa điểm nhận sách</strong> (tọa center). Nút <strong>Hoạch định đường đi</strong> chạy Dijkstra trên đồ thị bạn định nghĩa ở trang
-            <a href="/admin/tracking" class="text-sky-700 font-medium hover:underline">Tracking</a>:
-            cạnh <strong>waypoint–waypoint</strong> và cạnh <strong>pickup ↔ waypoint</strong> (portal vào mạng), trọng số đều là khoảng cách Euclid (m).
-            Hai pickup phải <strong>liên thông</strong> qua các cạnh đó (không còn tự nối ảo từ pickup tới mọi waypoint).
-            Sau khi xem lại thứ tự, nhấn <strong>Bắt đầu</strong> để gửi lên MQTT topic path với bốn mảng song song:
-            <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x</code>/<code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y</code> = center;
-            <code class="text-slate-700 bg-slate-100 px-1 rounded">stage_x_margin</code>/<code class="text-slate-700 bg-slate-100 px-1 rounded">stage_y_margin</code> = margin pickup hoặc <code class="text-slate-700 bg-slate-100 px-1 rounded">right_side</code> của waypoint.
-        </p>
-    </div>
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
         <div class="flex flex-wrap gap-4 items-end">
             <div class="min-w-[12rem] flex-1">
@@ -409,10 +375,7 @@
 
         <div class="rounded-xl border border-slate-200 bg-slate-50/90 p-4 space-y-3"
             x-show="journeyPhase !== 'off' || testRunLog.length > 0">
-            <p class="text-xs font-bold text-slate-800">
-                Theo dõi hành trình test — <span class="font-mono text-indigo-800" x-text="topicHasMovingLabel"></span>
-                + toàn bộ topic trạng thái UGV (gồm <span class="font-mono" x-text="topicRobotStatusLabel"></span>)
-            </p>
+            <p class="text-xs font-bold text-slate-800">Theo dõi hành trình test</p>
             <p class="text-xs text-slate-700 leading-relaxed" x-show="journeySummary" x-text="journeySummary"></p>
             <div class="flex flex-wrap items-center gap-2 text-xs">
                 <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium"
@@ -475,32 +438,8 @@
 <div class="max-w-7xl mx-auto mt-10 space-y-4" x-data='waypointDatasetEditor({{ wpds_cfg|tojson }})'>
     <div>
         <h2 class="text-xl font-bold text-slate-900">Dataset waypoint robot</h2>
-        <p class="text-sm text-slate-500 mt-1">
-            Mỗi waypoint có <strong>một tên</strong>. Hai thuộc tính <code class="text-slate-700 bg-slate-100 px-1 rounded">center</code> và
-            <code class="text-slate-700 bg-slate-100 px-1 rounded">right_side</code> mỗi thuộc tính có cặp <strong>x, y</strong> riêng (mét).
-            Nút <strong class="text-teal-700">Pose → center</strong> / <strong class="text-teal-700">Pose → right_side</strong> gán tọa độ hiện tại từ
-            <code class="text-slate-700 bg-slate-100 px-1 rounded">UGV/localization/pose</code> (MQTT). Dataset lưu Firestore hoặc DB local.
-        </p>
     </div>
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
-        <div class="rounded-xl border border-teal-100 bg-teal-50/50 p-3 space-y-2">
-            <p class="text-xs font-semibold text-teal-900">Pose robot — <span class="font-mono text-teal-800" x-text="topicPose"></span></p>
-            <div class="flex flex-wrap items-center gap-2 text-xs">
-                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium"
-                    :class="{
-                        'bg-emerald-100 text-emerald-800': poseConn === 'connected',
-                        'bg-amber-100 text-amber-800': poseConn === 'reconnecting',
-                        'bg-slate-200 text-slate-600': poseConn === 'disconnected',
-                        'bg-red-100 text-red-800': poseConn === 'error',
-                    }">
-                    <span class="w-1.5 h-1.5 rounded-full" :class="poseConn === 'connected' ? 'bg-emerald-500' : 'bg-slate-400'"></span>
-                    <span x-text="poseConnLabel"></span>
-                </span>
-                <span class="text-slate-600">x, y:</span>
-                <span class="font-mono text-slate-800 break-all" x-text="poseLiveSummary"></span>
-            </div>
-            <p class="text-[11px] text-red-600 min-h-[1rem]" x-show="poseErr" x-text="poseErr"></p>
-        </div>
         <div class="space-y-4">
             <template x-for="(r, i) in items" :key="r._k">
                 <div class="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3">

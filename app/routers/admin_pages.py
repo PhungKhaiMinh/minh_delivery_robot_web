@@ -173,16 +173,3 @@ async def admin_settings(request: Request):
     }
     return templates.TemplateResponse(request, "admin/settings.html", ctx)
 
-
-@router.get("/emergency", response_class=HTMLResponse)
-async def admin_emergency(request: Request):
-    user, redir = _require_admin_page(request)
-    if redir:
-        return redir
-    ctx = {
-        "user": user,
-        "admin_page": "emergency",
-        "current_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
-        **_mqtt_ctx(),
-    }
-    return templates.TemplateResponse(request, "admin/emergency.html", ctx)

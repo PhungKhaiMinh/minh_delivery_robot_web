@@ -3,7 +3,7 @@
 {% block title %}Đơn hàng {{ booking._id[:12] }}{% endblock %}
 
 {% block head %}
-{% if is_active %}
+{% if is_active and booking.status not in ['pending', 'in_progress'] %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 {% endif %}
 {% endblock %}
@@ -39,11 +39,12 @@
                     {{ si[0] }}
                 </span>
             </div>
+            {% set show_robot_panel = is_active and booking.status not in ['pending', 'in_progress'] %}
             
-            <div class="grid grid-cols-1 {{ 'lg:grid-cols-5' if is_active else '' }} gap-6">
+            <div class="grid grid-cols-1 {{ 'lg:grid-cols-5' if show_robot_panel else '' }} gap-6">
                 
                 <!-- Thông tin đơn hàng -->
-                <div class="{{ 'lg:col-span-2' if is_active else 'max-w-2xl' }} space-y-4">
+                <div class="{{ 'lg:col-span-2' if show_robot_panel else 'max-w-2xl' }} space-y-4">
                     
                     <!-- Info Card -->
                     <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -116,8 +117,8 @@
                         </div>
                     </div>
                     
-                    {% if is_active %}
-                    <!-- Robot Status Card (chỉ hiện khi đơn đang active) -->
+                    {% if show_robot_panel %}
+                    <!-- Robot Status Card (đã xác nhận trở đi, có bản đồ theo dõi) -->
                     <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
                         <h3 class="font-semibold text-gray-900 mb-4 flex items-center gap-2">
                             <i data-lucide="bot" class="w-4 h-4 text-primary-500"></i>
@@ -183,8 +184,8 @@
                     </div>
                 </div>
                 
-                {% if is_active %}
-                <!-- Bản đồ theo dõi Robot (chỉ hiện khi đơn đang active) -->
+                {% if show_robot_panel %}
+                <!-- Bản đồ theo dõi Robot -->
                 <div class="lg:col-span-3 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
                     <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
                         <h3 class="font-semibold text-gray-900 flex items-center gap-2">
@@ -230,7 +231,7 @@ async function cancelOrder(bookingId) {
 }
 </script>
 
-{% if is_active %}
+{% if is_active and booking.status not in ['pending', 'in_progress'] %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const PICKUP_X = {% if pickup_map_x is not none %}{{ pickup_map_x }}{% else %}null{% endif %};

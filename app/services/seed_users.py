@@ -10,7 +10,7 @@ from app.services.auth_service import hash_password
 DEMO_ACCOUNTS = [
     {
         "email": "admin@hcmut.edu.vn",
-        "name": "Quản trị viên Demo",
+        "name": "Quản trị viên",
         "phone": "0900000001",
         "password": "123456",
         "role": "admin",

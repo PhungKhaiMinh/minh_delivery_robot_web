@@ -29,8 +29,8 @@ class BookingCreate(BaseModel):
     def validate_book_count(cls, v: int) -> int:
         if v < 1:
             raise ValueError("Số lượng sách phải ít nhất là 1")
-        if v > 20:
-            raise ValueError("Tối đa 20 cuốn sách mỗi lần giao")
+        if v > 10:
+            raise ValueError("Tối đa 10 cuốn sách mỗi lần giao")
         return v
 
     @field_validator("pickup_date")

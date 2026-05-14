@@ -10,7 +10,6 @@
             </div>
             <div class="min-w-0">
                 <p class="font-bold text-white truncate">BK BookBot</p>
-                <p class="text-xs text-slate-400">Admin Console</p>
             </div>
         </div>
         <button type="button" class="md:hidden p-1 rounded text-slate-400 hover:text-white" @click="mobileNav = false" aria-label="Đóng">
@@ -25,7 +24,6 @@
             ('tracking', 'map', 'Tracking', '/admin/tracking'),
             ('plotting', 'line-chart', 'Plotting', '/admin/plotting'),
             ('settings', 'settings', 'Settings', '/admin/settings'),
-            ('emergency', 'alert-octagon', 'Emergency', '/admin/emergency'),
         ] %}
         {% for key, icon, label, href in nav %}
         <a

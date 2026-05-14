@@ -12,9 +12,6 @@
 <div class="max-w-7xl mx-auto space-y-6" x-data='adminPlotting({{ plot_cfg|tojson }})'>
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Plotting</h1>
-        <p class="text-sm text-slate-500 mt-1">
-            Biểu đồ thời gian thực — cập nhật 10 Hz qua bridge MQTT.
-        </p>
     </div>
 
     <div class="flex flex-wrap items-center gap-3">
@@ -36,12 +33,10 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
                 <h2 class="text-sm font-semibold text-slate-800 mb-1">Bánh trái: thực tế vs điều khiển / Time (s)</h2>
-                <p class="text-[11px] text-slate-400 mb-2">UGV/control/curr_vel (trái) + UGV/control/vel (trái)</p>
                 <canvas id="plot-wheel-left" height="100"></canvas>
             </div>
             <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
                 <h2 class="text-sm font-semibold text-slate-800 mb-1">Bánh phải: thực tế vs điều khiển / Time (s)</h2>
-                <p class="text-[11px] text-slate-400 mb-2">UGV/control/curr_vel (phải) + UGV/control/vel (phải)</p>
                 <canvas id="plot-wheel-right" height="100"></canvas>
             </div>
         </div>
@@ -49,12 +44,10 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
                 <h2 class="text-sm font-semibold text-slate-800 mb-1">Cross track / Time (s)</h2>
-                <p class="text-[11px] text-slate-400 mb-2">UGV/control/para</p>
                 <canvas id="plot-cross" height="100"></canvas>
             </div>
             <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
                 <h2 class="text-sm font-semibold text-slate-800 mb-1">Along track / Time (s)</h2>
-                <p class="text-[11px] text-slate-400 mb-2">UGV/control/para</p>
                 <canvas id="plot-along" height="100"></canvas>
             </div>
         </div>
@@ -62,25 +55,14 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
                 <h2 class="text-sm font-semibold text-slate-800 mb-1">Byte/s (2 STM) / Time (s)</h2>
-                <p class="text-[11px] text-slate-400 mb-2">UGV/bytePerSecond</p>
                 <canvas id="plot-bytes" height="100"></canvas>
             </div>
             <div class="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm">
                 <h2 class="text-sm font-semibold text-slate-800 mb-1">Góc yaw (pose) &amp; desired_heading / Time (s)</h2>
-                <p class="text-[11px] text-slate-400 mb-2">UGV/localization/pose (yaw) + UGV/control/para (desired_heading)</p>
                 <canvas id="plot-yaw" height="100"></canvas>
             </div>
         </div>
     </div>
-
-    <details class="text-xs text-slate-500 bg-slate-50 rounded-xl p-4 border border-slate-200">
-        <summary class="cursor-pointer font-medium text-slate-700">Topic đang subscribe</summary>
-        <ul class="mt-3 space-y-1 font-mono text-[11px] list-none pl-0">
-            {% for key, path in robot_status_ugv_topics.items() %}
-            <li><span class="text-slate-400">{{ key }}:</span> {{ path }}</li>
-            {% endfor %}
-        </ul>
-    </details>
 </div>
 
 <script>

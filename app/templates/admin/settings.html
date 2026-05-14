@@ -17,9 +17,6 @@
 <div class="max-w-4xl mx-auto space-y-8" x-data='adminSettings({{ settings_cfg|tojson }})'>
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Settings</h1>
-        <p class="text-sm text-slate-500 mt-1">
-            Chọn chế độ điều khiển robot và (ở chế độ thủ công) nhập tốc độ bánh. Payload JSON được gửi tới topic MQTT bên dưới để firmware robot đọc.
-        </p>
     </div>
 
     <div class="flex flex-wrap items-center gap-3">
@@ -33,7 +30,6 @@
             <span class="w-2 h-2 rounded-full" :class="conn === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'"></span>
             <span x-text="connLabel"></span>
         </span>
-        <span class="text-xs text-slate-500">Vel: <code class="bg-slate-200 px-1 rounded" x-text="topicVel"></code></span>
     </div>
     <p class="text-xs text-red-600 min-h-[1rem]" x-show="publishError" x-text="publishError"></p>
 
@@ -43,14 +39,6 @@
             <span class="w-2.5 h-2.5 rounded-full bg-violet-500"></span>
             Bản đồ Tracking (PGM + YAML)
         </p>
-
-        <div class="rounded-xl border border-violet-200 bg-violet-50/90 p-4 space-y-2">
-            <p class="text-sm font-semibold text-violet-950">Bước 1 — Tải map vào thư viện / Step 1 — Upload to library</p>
-            <p class="text-xs text-violet-900/90 leading-relaxed">
-                <strong>Khuyến nghị / Recommended:</strong> chỉ cần làm ở đây. Chọn <code class="text-[11px] bg-white/80 px-1 rounded">.pgm</code> và (nếu có) <code class="text-[11px] bg-white/80 px-1 rounded">map.yaml</code> ROS, nhấn <strong>Thêm vào thư viện</strong>.
-                Map mới sẽ thành <em>active</em> tự động — mở trang <strong>Tracking</strong> là thấy bản đồ (hoặc chọn map khác trong dropdown Tracking).
-            </p>
-        </div>
 
         <dl class="text-xs space-y-1 font-mono text-slate-700 bg-slate-50 rounded-xl p-3 border border-slate-100">
             <div class="flex flex-wrap gap-x-2"><dt class="text-slate-500 shrink-0">PGM đang dùng (meta)</dt><dd class="break-all" x-text="occPath || occGridMapPath"></dd></div>
@@ -108,38 +96,6 @@
                 </button>
             </div>
         </div>
-
-        <details class="rounded-xl border border-slate-200 bg-slate-50/80 open:bg-white open:shadow-sm">
-            <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">
-                Nâng cao: ghi đè biến môi trường <code class="text-xs font-mono font-normal text-slate-600">OCC_GRID_MAP_PATH</code> (tùy chọn / optional)
-            </summary>
-            <div class="px-4 pb-4 pt-0 space-y-3 border-t border-slate-100">
-                <p class="text-xs text-slate-600 leading-relaxed">
-                    Dùng khi deploy một file map cố định trên volume (Docker/Railway). Thao tác này <strong>ghi đè</strong> đúng một file đích — <em>khác</em> thư viện ở trên. Thường bạn <strong>không cần</strong> mở mục này nếu đã dùng thư viện.
-                    <span class="block mt-1 text-slate-500">English: overwrites the single env path; use only if you rely on <code class="font-mono">OCC_GRID_MAP_PATH</code> on disk.</span>
-                </p>
-                <div class="flex flex-wrap items-end gap-3">
-                    <label class="block min-w-[12rem] flex-1">
-                        <span class="text-xs font-medium text-slate-600">PGM</span>
-                        <input type="file" accept=".pgm,.pnm,image/x-portable-graymap,application/octet-stream" x-ref="occPgmFile"
-                            class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-100 file:text-emerald-800 hover:file:bg-emerald-200" />
-                    </label>
-                    <label class="block min-w-[10rem] flex-1">
-                        <span class="text-xs font-medium text-slate-600">map.yaml</span>
-                        <input type="file" accept=".yaml,.yml,text/yaml,application/x-yaml,.yaml,.yml" x-ref="occYamlFile"
-                            class="mt-1 block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200" />
-                    </label>
-                    <button type="button" @click="uploadOccGridMap()"
-                        :disabled="occUploading"
-                        class="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 shrink-0">
-                        <span x-show="!occUploading">Ghi đè file env</span>
-                        <span x-show="occUploading">Đang tải…</span>
-                    </button>
-                </div>
-                <p class="text-xs text-emerald-700 font-medium min-h-[1rem]" x-show="occMsg" x-text="occMsg"></p>
-                <p class="text-xs text-red-600 min-h-[1rem]" x-show="occErr" x-text="occErr"></p>
-            </div>
-        </details>
     </div>
 
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-6">
@@ -159,13 +115,11 @@
                     class="flex-1 py-2.5 rounded-lg text-sm transition-all"
                 >Thủ công (Manual)</button>
             </div>
-            <p class="text-xs text-slate-500 mt-2">Auto: robot chạy theo lộ trình / stack điều khiển. Manual: dùng tốc độ bánh bên dưới.</p>
         </div>
 
         <!-- Manual: tốc độ bánh -->
         <div class="space-y-4" :class="mode !== 'manual' ? 'opacity-50 pointer-events-none' : ''">
             <p class="text-sm font-semibold text-slate-800">Tốc độ bánh (chỉ khi Manual)</p>
-            <p class="text-xs text-slate-500 -mt-2">Đơn vị do firmware quy ước. Nhập số âm nếu robot hỗ trợ lùi.</p>
             <div class="max-w-xs">
                 <label class="block">
                     <span class="text-xs font-medium text-slate-600">Tốc độ max khi điều khiển nhanh</span>
@@ -174,7 +128,6 @@
                         class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-900 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 disabled:bg-slate-100"
                         placeholder="50" />
                 </label>
-                <p class="mt-1 text-[11px] text-slate-500">Giới hạn cho cụm 4 hướng và joystick (1..50).</p>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <label class="block">
@@ -192,42 +145,8 @@
                         placeholder="0" />
                 </label>
             </div>
-            <!-- D-pad / phím mũi tên: giữ càng lâu tốc độ càng tăng (MQTT UGV/Control) -->
-            <div class="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
-                <p class="text-sm font-semibold text-slate-800">Điều khiển nhanh (mũi tên / giữ chuột)</p>
-                <p class="text-xs text-slate-500">
-                    Tiến/lùi: hai bánh cùng tốc độ, tăng dần tới <span class="font-mono" x-text="String(arrowMaxLinear)"></span>.
-                    Rẽ trái: phải = 2× trái (trái tối đa <span class="font-mono" x-text="String(arrowMaxTurnSlow)"></span>).
-                    Rẽ phải: trái = 2× phải. Thả phím / thả chuột → gửi 0.
-                    Có thể dùng phím <kbd class="px-1 bg-white border rounded text-[10px]">↑</kbd><kbd class="px-1 bg-white border rounded text-[10px]">↓</kbd><kbd class="px-1 bg-white border rounded text-[10px]">←</kbd><kbd class="px-1 bg-white border rounded text-[10px]">→</kbd> khi không gõ trong ô input.
-                </p>
-                <div class="flex justify-center select-none" @mouseleave="arrowPointerUp()">
-                    <div class="grid grid-cols-3 gap-2 w-[11.5rem]">
-                        <span></span>
-                        <button type="button" class="h-14 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl text-slate-700 hover:bg-sky-50 hover:border-sky-300 active:bg-sky-100 flex items-center justify-center disabled:opacity-40"
-                            :disabled="mode !== 'manual' || conn !== 'connected'"
-                            @mousedown.prevent="arrowPointerDown('up')" @mouseup.prevent="arrowPointerUp()" @touchstart.prevent="arrowPointerDown('up')" @touchend.prevent="arrowPointerUp()">↑</button>
-                        <span></span>
-                        <button type="button" class="h-14 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl text-slate-700 hover:bg-sky-50 hover:border-sky-300 active:bg-sky-100 flex items-center justify-center disabled:opacity-40"
-                            :disabled="mode !== 'manual' || conn !== 'connected'"
-                            @mousedown.prevent="arrowPointerDown('left')" @mouseup.prevent="arrowPointerUp()" @touchstart.prevent="arrowPointerDown('left')" @touchend.prevent="arrowPointerUp()">←</button>
-                        <button type="button" class="h-14 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl text-slate-700 hover:bg-sky-50 hover:border-sky-300 active:bg-sky-100 flex items-center justify-center disabled:opacity-40"
-                            :disabled="mode !== 'manual' || conn !== 'connected'"
-                            @mousedown.prevent="arrowPointerDown('down')" @mouseup.prevent="arrowPointerUp()" @touchstart.prevent="arrowPointerDown('down')" @touchend.prevent="arrowPointerUp()">↓</button>
-                        <button type="button" class="h-14 rounded-xl bg-white border border-slate-200 shadow-sm text-2xl text-slate-700 hover:bg-sky-50 hover:border-sky-300 active:bg-sky-100 flex items-center justify-center disabled:opacity-40"
-                            :disabled="mode !== 'manual' || conn !== 'connected'"
-                            @mousedown.prevent="arrowPointerDown('right')" @mouseup.prevent="arrowPointerUp()" @touchstart.prevent="arrowPointerDown('right')" @touchend.prevent="arrowPointerUp()">→</button>
-                    </div>
-                </div>
-                <p class="text-center text-xs font-mono text-slate-600 min-h-[1.25rem]" x-text="arrowStatusLine"></p>
-            </div>
             <div class="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
                 <p class="text-sm font-semibold text-slate-800">Núm xoay ảo (joystick cho iPad)</p>
-                <p class="text-xs text-slate-500">
-                    Kéo núm như tay cầm gamepad để điều khiển analog. Tốc độ bánh được giới hạn trong
-                    [-<span class="font-mono" x-text="String(arrowMaxLinear)"></span>, +<span class="font-mono" x-text="String(arrowMaxLinear)"></span>].
-                    Thả tay → tự về 0.
-                </p>
                 <div class="flex justify-center select-none">
                     <div
                         class="relative w-56 h-56 rounded-full border border-slate-300 bg-white/80 shadow-inner touch-none"
@@ -257,11 +176,11 @@
                     :disabled="mode !== 'manual' || conn !== 'connected'"
                     class="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-colors"
                     :class="streaming ? 'bg-red-600 hover:bg-red-700' : 'bg-sky-600 hover:bg-sky-700'">
-                    <span x-text="streaming ? '⏹ Dừng gửi' : '▶ Bắt đầu gửi (10 Hz)'"></span>
+                    <span x-text="streaming ? '⏹ Dừng gửi' : '▶ Bắt đầu gửi'"></span>
                 </button>
                 <span x-show="streaming" class="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
                     <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Đang gửi liên tục 10 Hz
+                    Đang gửi liên tục
                 </span>
             </div>
             <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="lastOk" x-text="lastOk"></p>
@@ -272,12 +191,7 @@
     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 space-y-4">
         <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
             <span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
-            Tham số LOS / điều hướng
-        </p>
-        <p class="text-xs text-slate-500">
-            Gửi JSON lên <code class="bg-slate-200 px-1 rounded" x-text="topicParaLos"></code>.
-            Chỉ các ô có nhập giá trị mới được đưa vào payload.
-            Khi gửi MQTT thành công, server lưu đúng payload đó (Firestore hoặc DB local) để lần sau mở trang sẽ điền sẵn các giá trị từ lần gửi gần nhất.
+            Tham số LOS
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <label class="block"><span class="text-xs font-medium text-slate-600">MAX_Linear</span>
@@ -325,11 +239,6 @@
             <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
             Tham số CAN
         </p>
-        <p class="text-xs text-slate-500">
-            Gửi JSON lên <code class="bg-slate-200 px-1 rounded" x-text="topicParaCan"></code>.
-            Chỉ các ô có nhập giá trị mới được đưa vào payload.
-            Khi gửi MQTT thành công, server lưu đúng payload đó (Firestore hoặc DB local) để lần sau mở trang sẽ điền sẵn các giá trị từ lần gửi gần nhất.
-        </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-3xl">
             <label class="block"><span class="text-xs font-medium text-slate-600">LoopSerialCan</span>
                 <input type="text" inputmode="decimal" x-model="canPara.LoopSerialCan" placeholder="(bỏ trống = không gửi)" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-amber-500" spellcheck="false" /></label>
@@ -353,22 +262,6 @@
         <p class="text-xs text-emerald-700 font-medium min-h-[1.25rem]" x-show="canOk" x-text="canOk"></p>
         <p class="text-xs text-red-600 min-h-[1rem]" x-show="canError" x-text="canError"></p>
     </div>
-
-    <details class="text-xs text-slate-500 bg-slate-50 rounded-xl p-4 border border-slate-200">
-        <summary class="cursor-pointer font-medium text-slate-700">Payload JSON mẫu</summary>
-        <pre class="mt-3 overflow-x-auto text-[11px] leading-relaxed"><span class="text-slate-400">// UGV/Control</span>
-{
-  "manual_mode": true,
-  "left_vel": 120,
-  "right_vel": 118
-}
-
-<span class="text-slate-400">// UGV/para/los (chỉ gửi key đã nhập)</span>
-{ "MAX_Linear": 1.2, "Accel_Linear": 0.3, "Accel_Angular": 0.2, "PID_Kp": 0.5 }
-
-<span class="text-slate-400">// UGV/para/can</span>
-{ "LoopSerialCan": 10, "LoopSendVel": 20, "safe_angle": 0.1, "safe_distance": 1.5, "loop_calib_yaw": 0.02 }</pre>
-    </details>
 </div>
 
 <script>

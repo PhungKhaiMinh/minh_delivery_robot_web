@@ -31,10 +31,6 @@
 <div class="max-w-7xl mx-auto space-y-6" x-data='adminTracking(Object.assign({{ tracking_cfg|tojson }}, { occMapId: (function () { try { return localStorage.getItem("admin_tracking_occ_map_id") || ""; } catch (e) { return ""; } })() }))' x-init="init()">
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Tracking</h1>
-        <p class="text-sm text-slate-500 mt-1">
-            <strong>Tiếng Việt:</strong> Bản đồ từ server (PGM → PNG, mét). Mở <a href="/admin/settings" class="text-sky-700 font-medium hover:underline">Settings → Bản đồ Tracking</a> để tải map; mặc định dùng map <em>active</em> trong thư viện (hoặc file env nếu bỏ active).
-            <strong>English:</strong> Upload maps in Settings; Tracking uses the library <em>active</em> map unless you pick another in the list below.
-        </p>
     </div>
 
     <div class="flex flex-wrap items-center gap-3">
@@ -71,7 +67,6 @@
     </div>
 
     <p class="text-sm text-red-600 font-medium" x-show="graphErr" x-text="graphErr"></p>
-    <p class="text-xs text-slate-500" x-show="graphMeta && !graphErr" x-text="graphMeta"></p>
 
     <div class="rounded-2xl border border-violet-200 bg-violet-50/80 p-4 space-y-3" x-show="mapReady">
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -81,15 +76,6 @@
                 Chế độ nối cạnh
             </label>
         </div>
-        <p class="text-xs text-violet-800/90 leading-relaxed">
-            <strong>Cạnh waypoint–waypoint (tím):</strong> bật <em>Chế độ nối cạnh</em> → chọn waypoint A → waypoint B.<br>
-            <strong>Cạnh pickup ↔ waypoint (cam nét đứt):</strong> chọn pickup rồi waypoint (hoặc ngược lại).
-            Nhấn lại cùng một điểm để hủy bước chọn. <kbd class="px-1 bg-white rounded border text-[10px]">Esc</kbd> xóa lựa chọn.
-        </p>
-        <p class="text-xs text-violet-700/90 font-medium">
-            Điểm tím (waypoint) và cam (pickup) dùng cùng phép chiếu world → map với pose MQTT (lật Y giống layer trước đây).
-        </p>
-        <p class="text-xs font-medium" :class="graphEditMode ? 'text-amber-800' : 'text-slate-500'" x-text="graphHint"></p>
         <div class="flex flex-wrap gap-2">
             <button type="button" @click="saveWaypointGraph()" :disabled="graphSaving"
                 class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-700 text-white hover:bg-violet-800 disabled:opacity-50">
@@ -134,24 +120,14 @@
     </div>
 
     <div class="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 space-y-2" x-show="mapReady">
-        <h2 class="text-sm font-bold text-amber-900">Né vật cản — <span class="font-mono text-xs text-amber-800" x-text="topicAvoidLabel"></span></h2>
-        <p class="text-xs text-amber-900/90 leading-relaxed">
-            <strong>Tiếng Việt:</strong> Map và JSON cập nhật <strong>liên tục</strong> theo MQTT. Tin <strong>không có điểm</strong> → map giữ bản có điểm gần nhất trong phiên.
-            Mỗi khi nhận payload hợp lệ, hệ thống <strong>lưu vào localStorage</strong> trình duyệt; thoát rồi vào lại Tracking sẽ <strong>khôi phục</strong> lên map và ô JSON.
-            <code class="text-[10px]">wp_x</code>/<code class="text-[10px]">wp_y</code> mặc định là map (mét); dùng <code class="text-[10px]">robot_relative</code> / <code class="text-[10px]">frame_id</code> base_* nếu là base_link.
-            <strong>English:</strong> Live MQTT updates; empty messages keep the last in-session path; each valid path is saved in the browser so a return visit restores the latest avoidance waypoints.
-        </p>
+        <h2 class="text-sm font-bold text-amber-900">Né vật cản</h2>
         <div class="flex flex-wrap gap-4 text-xs text-amber-950 items-center">
             <span><strong>has_waypoint</strong>: <span class="font-mono" x-text="avoidHasWaypoint === null ? '—' : avoidHasWaypoint"></span></span>
             <span><strong>has_avoid_obstacles</strong>: <span class="font-mono" x-text="avoidHasObstacles === null ? '—' : avoidHasObstacles"></span></span>
             <span><strong>Số điểm trên map</strong>: <span class="font-mono" x-text="avoidWpCount"></span></span>
-            <span class="text-amber-800" x-show="avoidLastAt">MQTT nhận: <span x-text="avoidLastAt"></span></span>
         </div>
-        <p class="text-xs text-amber-800 min-h-[1.25rem]" x-show="avoidStoredLabel" x-text="avoidStoredLabel"></p>
-        <pre class="text-[11px] font-mono bg-white/90 border border-amber-100 rounded-lg p-3 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap" x-text="avoidJsonPretty || '— (chưa nhận payload)'"></pre>
     </div>
 
-    <p class="text-xs text-slate-400">Pose: <code>{"x":0.0,"y":0.0,"yaw":0.0}</code> — rad, CCW từ +X (Đông); icon hướng Bắc=0°; lật Y map như waypoint.</p>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>

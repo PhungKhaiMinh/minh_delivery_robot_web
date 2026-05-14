@@ -16,11 +16,6 @@
 >
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Robot Status</h1>
-        <p class="text-sm text-slate-500 mt-1">
-            MQTT WebSocket <code class="text-xs bg-slate-200 px-1 rounded">{{ mqtt_ws_url }}</code>
-            — đăng ký nhiều topic UGV (JSON). User: <code class="text-xs bg-slate-200 px-1 rounded">{{ mqtt_username }}</code>.
-            Nếu không kết nối được, kiểm tra broker đã bật listener <strong>WebSocket</strong> (thường khác cổng TCP 1883).
-        </p>
     </div>
 
     <div class="flex flex-wrap items-center gap-3">
@@ -38,12 +33,10 @@
         <span class="text-xs text-red-600" x-show="errDetail" x-text="errDetail"></span>
     </div>
 
-    <!-- Vị trí & hướng: chỉ từ UGV/localization/pose -->
     <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm border-l-4 border-l-sky-500">
         <h2 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
             <i data-lucide="crosshair" class="w-4 h-4 text-sky-600"></i>
-            Vị trí &amp; hướng (localization)
-            <span class="text-xs font-normal text-slate-400 font-mono">UGV/localization/pose</span>
+            Vị trí &amp; hướng
         </h2>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
@@ -65,7 +58,6 @@
     <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
         <h2 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
             <i data-lucide="map-pin" class="w-4 h-4 text-slate-500"></i> Chế độ định vị vệ tinh
-            <span class="text-xs font-normal text-slate-400">UGV/state/gps</span>
         </h2>
         <div>
             <p class="text-xs font-medium text-slate-500">mode_gps</p>
@@ -83,7 +75,6 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm border-l-4 border-l-sky-500">
             <h2 class="text-sm font-bold text-slate-800 mb-3">Tốc độ bánh thực tế</h2>
-            <p class="text-xs text-slate-400 mb-4">UGV/control/curr_vel — <code>left</code>, <code>right</code></p>
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <p class="text-xs font-medium text-slate-500">Trái</p>
@@ -97,7 +88,6 @@
         </div>
         <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm border-l-4 border-l-fuchsia-500">
             <h2 class="text-sm font-bold text-slate-800 mb-3">Tốc độ điều khiển động cơ</h2>
-            <p class="text-xs text-slate-400 mb-4">UGV/control/vel — <code>left</code>, <code>right</code></p>
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <p class="text-xs font-medium text-slate-500">Trái</p>
@@ -115,12 +105,10 @@
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">STM cảm biến — byte/s</h2>
-            <p class="text-xs text-slate-400 mb-2">UGV/bytePerSecond — <code>byte_sensor</code></p>
             <p class="text-3xl font-bold text-amber-700 font-mono" x-text="byteSensor != null ? byteSensor : '—'"></p>
         </div>
         <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">STM encoder — byte/s</h2>
-            <p class="text-xs text-slate-400 mb-2">UGV/bytePerSecond — <code>byte_vel</code></p>
             <p class="text-3xl font-bold text-teal-700 font-mono" x-text="byteVel != null ? byteVel : '—'"></p>
         </div>
     </div>
@@ -129,25 +117,21 @@
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Ổ khóa</h2>
-            <p class="text-xs text-slate-400 mb-2">UGV/status/has_locked — <code>lock</code></p>
             <p class="text-lg font-semibold" :class="locked === true ? 'text-rose-600' : (locked === false ? 'text-emerald-600' : 'text-slate-500')" x-text="lockLabel"></p>
         </div>
         <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Trạng thái di chuyển</h2>
-            <p class="text-xs text-slate-400 mb-2">UGV/status/has_moving</p>
             <p class="text-lg font-bold" :class="hasMoving === true ? 'text-sky-700' : (hasMoving === false ? 'text-slate-600' : 'text-slate-500')" x-text="movingLabel"></p>
         </div>
         <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Đến điểm</h2>
-            <p class="text-xs text-slate-400 mb-2">UGV/status/arrial — <code>has_arrial</code></p>
             <p class="text-lg font-bold" :class="hasArrival === true ? 'text-emerald-700' : (hasArrival === false ? 'text-slate-600' : 'text-slate-500')" x-text="arrivalLabel"></p>
         </div>
     </div>
 
     <!-- Tham số điều khiển -->
     <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-        <h2 class="text-sm font-bold text-slate-800 mb-2">UGV/control/para</h2>
-        <p class="text-xs text-slate-500 mb-2">Payload JSON gần nhất (theo firmware).</p>
+        <h2 class="text-sm font-bold text-slate-800 mb-2">Tham số điều khiển</h2>
         <p class="text-xs text-slate-700 mb-3">
             <span class="font-semibold">look_ahead</span>:
             <span class="font-mono text-slate-900" x-text="formatCoordDisplay(paraLookAhead)"></span>
@@ -155,14 +139,6 @@
         <pre class="text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-x-auto whitespace-pre-wrap min-h-[4rem]" x-text="paraJson || '—'"></pre>
     </div>
 
-    <details class="text-xs text-slate-500 bg-slate-50 rounded-xl p-4 border border-slate-200">
-        <summary class="cursor-pointer font-medium text-slate-700">Danh sách topic đã đăng ký</summary>
-        <ul class="mt-3 space-y-1 font-mono text-[11px] list-none pl-0">
-            {% for key, path in robot_status_ugv_topics.items() %}
-            <li><span class="text-slate-400">{{ key }}:</span> {{ path }}</li>
-            {% endfor %}
-        </ul>
-    </details>
 </div>
 
 <script>

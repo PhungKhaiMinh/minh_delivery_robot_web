@@ -135,7 +135,7 @@ def cancel_booking(booking_id: str, user_id: str) -> tuple[bool, str]:
 
 def get_admin_queue_bookings() -> list[dict]:
     """
-    Đơn cho Admin: pending / confirmed / in_progress (hiển thị Pending hoặc Shipping).
+    Đơn cho Admin: pending / confirmed / in_progress (nhãn trạng thái tiếng Việt cho bảng).
     Gắn thêm _customer_name từ users.
     """
     try:
@@ -156,9 +156,13 @@ def get_admin_queue_bookings() -> list[dict]:
             b["_customer_name"] = customer_name(b.get("user_id", ""))
             st = b.get("status", "")
             if st == "pending":
-                b["_admin_status_label"] = "Pending"
+                b["_admin_status_label"] = "Đang chờ"
+            elif st == "confirmed":
+                b["_admin_status_label"] = "Đã xác nhận"
+            elif st == "in_progress":
+                b["_admin_status_label"] = "Đang giao"
             else:
-                b["_admin_status_label"] = "Shipping"
+                b["_admin_status_label"] = st or "—"
 
         filtered.sort(key=lambda x: x.get("_created_at", ""), reverse=True)
         return filtered
