@@ -24,6 +24,7 @@ from app.config import (
     MQTT_TOPIC_POSITION,
     MQTT_TOPIC_GPS_BASE,
     MQTT_UGV_TOPIC_POSE,
+    MQTT_UGV_TOPIC_VEL,
 )
 from app.services.pathfinding_service import local_to_gps
 
@@ -44,6 +45,8 @@ class _MqttService:
         self.robot_pose_x: Optional[float] = None
         self.robot_pose_y: Optional[float] = None
         self.robot_pose_yaw: Optional[float] = None
+        self._vel_lock = threading.Lock()
+        self.robot_vel_has_moving: Optional[bool] = None
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -84,6 +87,11 @@ class _MqttService:
     def connected(self) -> bool:
         return self._connected
 
+    def get_robot_vel_has_moving(self) -> Optional[bool]:
+        """Trạng thái di chuyển từ JSON ``UGV/control/vel`` (field ``has_moving``), hoặc None nếu chưa nhận."""
+        with self._vel_lock:
+            return self.robot_vel_has_moving
+
     # ------------------------------------------------------------------
     # paho callbacks
     # ------------------------------------------------------------------
@@ -93,8 +101,9 @@ class _MqttService:
             self._connected = True
             client.subscribe(MQTT_TOPIC_POSITION, qos=0)
             client.subscribe(MQTT_UGV_TOPIC_POSE, qos=0)
+            client.subscribe(MQTT_UGV_TOPIC_VEL, qos=0)
             print(
-                f"{_TAG} connected, subscribed {MQTT_TOPIC_POSITION} + {MQTT_UGV_TOPIC_POSE}"
+                f"{_TAG} connected, subscribed {MQTT_TOPIC_POSITION} + {MQTT_UGV_TOPIC_POSE} + {MQTT_UGV_TOPIC_VEL}"
             )
         else:
             print(f"{_TAG} connect rc={rc}")
@@ -120,6 +129,17 @@ class _MqttService:
                         self.robot_pose_yaw = float(yw)
                     except (TypeError, ValueError):
                         self.robot_pose_yaw = None
+                return
+            if msg.topic == MQTT_UGV_TOPIC_VEL:
+                data = json.loads(msg.payload)
+                if isinstance(data, dict) and "has_moving" in data:
+                    try:
+                        hm = bool(data.get("has_moving"))
+                    except (TypeError, ValueError):
+                        hm = None
+                    if hm is not None:
+                        with self._vel_lock:
+                            self.robot_vel_has_moving = hm
                 return
             if msg.topic == MQTT_TOPIC_POSITION:
                 data = json.loads(msg.payload)

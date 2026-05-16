@@ -268,6 +268,7 @@
                     case 'vel':
                         this.velCtrlLeft = pickNum(o.left, o.left_vel, o.control_vel && o.control_vel.left_vel);
                         this.velCtrlRight = pickNum(o.right, o.right_vel, o.control_vel && o.control_vel.right_vel);
+                        if (o.has_moving !== undefined) this.hasMoving = Boolean(o.has_moving);
                         touch();
                         break;
                     case 'para':
@@ -287,10 +288,6 @@
                     case 'has_locked':
                         if (o.lock !== undefined) this.locked = Boolean(o.lock);
                         else if (o.has_locked !== undefined) this.locked = Boolean(o.has_locked);
-                        touch();
-                        break;
-                    case 'has_moving':
-                        if (o.has_moving !== undefined) this.hasMoving = Boolean(o.has_moving);
                         touch();
                         break;
                     case 'arrival':

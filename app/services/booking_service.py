@@ -180,3 +180,38 @@ def get_active_bookings(user_id: str) -> list[dict]:
     except Exception as e:
         print(f"[BOOKING ERROR] Lỗi truy vấn active bookings: {e}")
         return []
+
+
+def get_booking_awaiting_robot_handoff(user_id: str) -> Optional[dict]:
+    """Đơn đang giao, robot đã đến điểm hẹn — chờ client xác nhận đã giao sách cho robot."""
+    for b in get_user_bookings(user_id):
+        if b.get("status") != BookingStatus.IN_PROGRESS:
+            continue
+        if b.get("delivery_phase") != "at_client":
+            continue
+        return b
+    return None
+
+
+def confirm_robot_handoff(booking_id: str, user_id: str) -> tuple[bool, str]:
+    """Client xác nhận đã để đủ sách vào robot; hệ thống sẽ cho robot về Thư viện rồi hoàn tất đơn."""
+    try:
+        booking = db.collection("bookings").document(booking_id).get()
+        if not booking:
+            return False, "Không tìm thấy đơn hàng"
+        if booking.get("user_id") != user_id:
+            return False, "Bạn không có quyền thao tác đơn này"
+        if booking.get("status") != BookingStatus.IN_PROGRESS:
+            return False, "Đơn không ở trạng thái đang giao"
+        if booking.get("delivery_phase") != "at_client":
+            return False, "Hiện không cần xác nhận cho đơn này"
+        if booking.get("delivery_user_confirmed_handoff"):
+            return False, "Bạn đã xác nhận trước đó"
+
+        db.collection("bookings").document(booking_id).update(
+            {"delivery_user_confirmed_handoff": datetime.now(timezone.utc).isoformat()}
+        )
+        return True, "Đã ghi nhận. Robot sẽ quay về Thư viện."
+    except Exception as e:
+        print(f"[BOOKING ERROR] confirm_robot_handoff: {e}")
+        return False, "Lỗi hệ thống"

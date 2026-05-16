@@ -11,7 +11,7 @@ from typing import Optional
 
 from app.services.pickup_locations_store import get_catalog_locations, list_pickup_locations_admin
 from app.services.auth_service import get_current_user
-from app.services.booking_service import get_user_bookings, get_active_bookings, get_booking_by_id
+from app.services.booking_service import get_user_bookings, get_active_bookings, get_booking_by_id, get_booking_awaiting_robot_handoff
 from app.services.db_service import db
 
 templates = Jinja2Templates(directory="app/templates")
@@ -93,6 +93,7 @@ async def page_dashboard(request: Request):
             stats["completed"] += 1
 
     current_date = datetime.now().strftime("%A, %d/%m/%Y")
+    handoff_booking = get_booking_awaiting_robot_handoff(user.id)
 
     return templates.TemplateResponse(
         request,
@@ -103,6 +104,7 @@ async def page_dashboard(request: Request):
             "stats": stats,
             "recent_bookings": bookings[:5],
             "current_date": current_date,
+            "handoff_booking": handoff_booking,
         },
     )
 

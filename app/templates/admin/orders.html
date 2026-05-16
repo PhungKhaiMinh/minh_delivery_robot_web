@@ -1047,7 +1047,7 @@ window._doDeleteOrder = async function (id) {
         var mqttPass = cfg.mqttPass;
         var topicRobotStatus = cfg.topicRobotStatus || 'robot/status';
         var ugvTopics = (cfg.ugvTopics && typeof cfg.ugvTopics === 'object') ? cfg.ugvTopics : {};
-        var topicHasMoving = ugvTopics.has_moving || 'UGV/status/has_moving';
+        var topicHasMoving = ugvTopics.vel || 'UGV/control/vel';
         var subscribeTopics = [];
         (function buildSubscribeList() {
             var seen = {};

@@ -30,6 +30,13 @@
                             <i data-lucide="clock" class="w-4 h-4"></i>
                             Xem đơn hàng
                         </a>
+                        {% if handoff_booking %}
+                        <button type="button" id="btn-confirm-handoff" data-bid="{{ handoff_booking._id }}"
+                            class="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white font-semibold rounded-xl hover:bg-emerald-600 transition-colors shadow-lg border border-emerald-400/80">
+                            <i data-lucide="check-circle" class="w-4 h-4"></i>
+                            Xác nhận đã giao sách cho robot
+                        </button>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -153,4 +160,40 @@
         </main>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var btn = document.getElementById('btn-confirm-handoff');
+    if (!btn) return;
+    btn.addEventListener('click', async function () {
+        var id = btn.getAttribute('data-bid');
+        if (!id || btn.disabled) return;
+        if (!confirm('Xác nhận bạn đã để đủ số sách đã đặt vào robot và robot đã đến đúng điểm hẹn?')) return;
+        btn.disabled = true;
+        try {
+            var res = await fetch('/api/bookings/' + encodeURIComponent(id) + '/confirm-robot-handoff', {
+                method: 'POST',
+                credentials: 'same-origin',
+            });
+            var data = await res.json().catch(function () { return {}; });
+            if (typeof showToast === 'function') {
+                showToast(data.message || (data.success ? 'Đã xác nhận.' : 'Không thực hiện được.'), data.success ? 'success' : 'error');
+            } else {
+                alert(data.message || JSON.stringify(data));
+            }
+            if (data.success) {
+                window.location.reload();
+            } else {
+                btn.disabled = false;
+            }
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Lỗi mạng', 'error');
+            else alert('Lỗi mạng');
+            btn.disabled = false;
+        }
+    });
+})();
+</script>
 {% endblock %}

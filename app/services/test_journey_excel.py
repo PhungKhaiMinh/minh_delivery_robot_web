@@ -115,10 +115,6 @@ def _merge_payload(state: Dict[str, Any], msg_key: str, o: dict) -> None:
         if "yaw" in o:
             state["pose_yaw"] = _to_float(o.get("yaw"))
         return
-    if msg_key == "has_moving":
-        if "has_moving" in o:
-            state["has_moving"] = _boolish(o.get("has_moving"))
-        return
     if msg_key == "has_locked":
         if "lock" in o:
             state["has_locked"] = _boolish(o.get("lock"))
@@ -146,6 +142,10 @@ def _merge_payload(state: Dict[str, Any], msg_key: str, o: dict) -> None:
             state["vel_ctrl_left"] = lv
         if rv is not None:
             state["vel_ctrl_right"] = rv
+        if "has_moving" in o:
+            b = _boolish(o.get("has_moving"))
+            if b is not None:
+                state["has_moving"] = b
         return
     if msg_key == "para":
         la = o.get("look_ahead")

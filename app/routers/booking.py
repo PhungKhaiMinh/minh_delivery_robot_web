@@ -13,6 +13,7 @@ from app.services.booking_service import (
     get_booking_by_id,
     cancel_booking,
     get_active_bookings,
+    confirm_robot_handoff,
 )
 
 router = APIRouter(prefix="/api/bookings", tags=["Bookings"])
@@ -115,6 +116,19 @@ async def api_active_orders(request: Request):
             for b in bookings
         ],
     })
+
+
+@router.post("/{booking_id}/confirm-robot-handoff")
+async def api_confirm_robot_handoff(booking_id: str, request: Request):
+    """Client xác nhận đã giao sách cho robot tại điểm hẹn (sau khi robot đã đến)."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"success": False, "message": "Vui lòng đăng nhập"})
+
+    ok, message = confirm_robot_handoff(booking_id, user.id)
+    if not ok:
+        return JSONResponse(status_code=400, content={"success": False, "message": message})
+    return JSONResponse(content={"success": True, "message": message})
 
 
 @router.get("/{booking_id}")

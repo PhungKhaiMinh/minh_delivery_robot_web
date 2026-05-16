@@ -129,6 +129,13 @@ MQTT_TOPIC_COMMAND = os.getenv("MQTT_TOPIC_COMMAND", "robot/command")
 MQTT_TOPIC_CONTROL = os.getenv("MQTT_TOPIC_CONTROL", "robot/control")
 MQTT_CLIENT_PREFIX = os.getenv("MQTT_CLIENT_PREFIX", "bookbot-admin")
 
+# UGV/control/vel — field has_moving (Robot Status + điều phối giao hàng)
+MQTT_UGV_TOPIC_VEL = os.getenv("MQTT_UGV_TOPIC_VEL", "UGV/control/vel")
+
+# Điều phối giao hàng tự động (scheduler): chờ xác nhận client tại điểm hẹn
+DELIVERY_HANDOFF_TIMEOUT_SEC = int(os.getenv("DELIVERY_HANDOFF_TIMEOUT_SEC", "120"))
+DELIVERY_LIBRARY_PICKUP_NAME = os.getenv("DELIVERY_LIBRARY_PICKUP_NAME", "Thư viện").strip() or "Thư viện"
+
 # Topic UGV — trang Admin Robot Status (subscribe từng topic, JSON theo firmware)
 # Vị trí + hướng từ bộ ước lượng (hiển thị chuẩn trên mọi trang)
 MQTT_UGV_TOPIC_POSE = os.getenv("MQTT_UGV_TOPIC_POSE", "UGV/localization/pose")
@@ -143,11 +150,11 @@ ROBOT_STATUS_UGV_TOPICS = {
     "gps": os.getenv("MQTT_UGV_TOPIC_GPS", "UGV/position/gps"),
     "state_gps": os.getenv("MQTT_UGV_TOPIC_STATE_GPS", "UGV/state/gps"),
     "curr_vel": os.getenv("MQTT_UGV_TOPIC_CURR_VEL", "UGV/control/curr_vel"),
-    "vel": os.getenv("MQTT_UGV_TOPIC_VEL", "UGV/control/vel"),
+    "vel": MQTT_UGV_TOPIC_VEL,
     "para": os.getenv("MQTT_UGV_TOPIC_PARA", "UGV/control/para"),
     "byte_per_sec": os.getenv("MQTT_UGV_TOPIC_BYTE_PER_SEC", "UGV/bytePerSecond"),
     "has_locked": os.getenv("MQTT_UGV_TOPIC_HAS_LOCKED", "UGV/status/has_locked"),
-    "has_moving": os.getenv("MQTT_UGV_TOPIC_HAS_MOVING", "UGV/status/has_moving"),
+    # has_moving: lấy từ JSON topic "vel" (UGV/control/vel), field boolean has_moving — không subscribe topic riêng.
     "arrival": os.getenv("MQTT_UGV_TOPIC_ARRIVAL", "UGV/status/arrial"),
 }
 
