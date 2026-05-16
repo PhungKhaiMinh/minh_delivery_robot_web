@@ -30,6 +30,22 @@ from app.services.pathfinding_service import local_to_gps
 
 _TAG = "[MQTT-CLIENT]"
 
+_PATH_FLOAT_KEYS = frozenset({"stage_x", "stage_y", "stage_x_margin", "stage_y_margin"})
+
+
+def mqtt_path_payload_as_float_dict(payload: dict) -> dict:
+    """
+    Shallow copy of a path payload where coordinate arrays are ``list[float]``.
+    Ensures JSON encodes numbers as floats (e.g. ``0.0`` not ``0``).
+    """
+    out: dict = {}
+    for k, v in payload.items():
+        if k in _PATH_FLOAT_KEYS and isinstance(v, list):
+            out[k] = [float(x) for x in v]
+        else:
+            out[k] = v
+    return out
+
 
 class _MqttService:
     """Lightweight wrapper around a single paho.mqtt.Client."""
@@ -166,17 +182,22 @@ class _MqttService:
     # ------------------------------------------------------------------
 
     def publish_path(self, payload: dict) -> bool:
-        """Publish path JSON to ``MQTT_TOPIC_PATH`` (``stage_x`` / ``stage_y``; optional margin arrays same length)."""
+        """Publish path JSON to ``MQTT_TOPIC_PATH`` (all path coordinates as JSON floats)."""
         if self._client is None or not self._connected:
             print(f"{_TAG} cannot publish — not connected")
             return False
-        sx = payload.get("stage_x")
-        sy = payload.get("stage_y")
+        try:
+            pl = mqtt_path_payload_as_float_dict(payload)
+        except (TypeError, ValueError) as exc:
+            print(f"{_TAG} publish_path: cannot coerce path numbers to float: {exc}")
+            return False
+        sx = pl.get("stage_x")
+        sy = pl.get("stage_y")
         if not isinstance(sx, list) or not isinstance(sy, list) or len(sx) != len(sy):
             print(f"{_TAG} publish_path: invalid stage_x/stage_y")
             return False
-        smx = payload.get("stage_x_margin")
-        smy = payload.get("stage_y_margin")
+        smx = pl.get("stage_x_margin")
+        smy = pl.get("stage_y_margin")
         if smx is not None or smy is not None:
             if not isinstance(smx, list) or not isinstance(smy, list):
                 print(f"{_TAG} publish_path: invalid margin arrays")
@@ -185,7 +206,7 @@ class _MqttService:
             if len(smx) != n or len(smy) != n:
                 print(f"{_TAG} publish_path: margin array length mismatch")
                 return False
-        raw = json.dumps(payload)
+        raw = json.dumps(pl)
         info = self._client.publish(MQTT_TOPIC_PATH, raw, qos=1)
         print(f"{_TAG} published path → {MQTT_TOPIC_PATH} ({len(raw)} bytes)")
         return info.rc == paho_mqtt.MQTT_ERR_SUCCESS

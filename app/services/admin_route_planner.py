@@ -199,10 +199,10 @@ def plan_field_route(start_pickup_id: str, end_pickup_id: str) -> Optional[Dict[
     smx: List[float] = []
     smy: List[float] = []
     for st in ordered_meta:
-        sx.append(st["cx"])
-        sy.append(st["cy"])
-        smx.append(st["mx"])
-        smy.append(st["my"])
+        sx.append(float(st["cx"]))
+        sy.append(float(st["cy"]))
+        smx.append(float(st["mx"]))
+        smy.append(float(st["my"]))
 
     total_len = sum(
         _euclid(

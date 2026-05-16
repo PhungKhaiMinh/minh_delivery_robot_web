@@ -254,8 +254,8 @@ def convert_gps_list_to_payload(points: list[tuple[float, float]]) -> dict:
     sy: list[float] = []
     for lat, lon in points:
         x, y = gps_to_local(lat, lon)
-        sx.append(x)
-        sy.append(y)
+        sx.append(float(x))
+        sy.append(float(y))
     return {"stage_x": sx, "stage_y": sy}
 
 
@@ -304,7 +304,7 @@ def build_dispatch_route(
     for idx in full_path:
         wp = CAMPUS_WAYPOINTS[idx]
         x, y = gps_to_local(wp["lat"], wp["lon"])
-        stage_x.append(x)
-        stage_y.append(y)
+        stage_x.append(float(x))
+        stage_y.append(float(y))
 
     return {"stage_x": stage_x, "stage_y": stage_y}
