@@ -13,8 +13,10 @@ from app.services.pickup_locations_store import get_catalog_locations, list_pick
 from app.services.auth_service import get_current_user
 from app.services.booking_service import get_user_bookings, get_active_bookings, get_booking_by_id, get_booking_awaiting_robot_handoff
 from app.services.db_service import db
+from app.utils.vn_time import format_iso_utc_to_vn_display
 
 templates = Jinja2Templates(directory="app/templates")
+templates.env.filters["vn_local_dt"] = format_iso_utc_to_vn_display
 
 router = APIRouter(tags=["Pages"])
 

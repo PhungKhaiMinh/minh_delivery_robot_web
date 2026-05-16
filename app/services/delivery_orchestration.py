@@ -258,6 +258,12 @@ def run_delivery_tick() -> None:
     lib_id = _resolve_library_pickup_id()
     if not lib_id:
         print(f"{_TAG} chưa có pickup tên «{DELIVERY_LIBRARY_PICKUP_NAME}» trong catalog — bỏ qua điều phối.")
+        due_no_lib = _pick_next_due_booking(all_bookings)
+        if due_no_lib:
+            print(
+                f"{_TAG} có đơn đã đến/qua giờ hẹn (vd. {str(due_no_lib.get('_id', ''))[:16]}…) "
+                "nhưng không thể gửi MQTT cho tới khi có điểm «Thư viện» trong catalog."
+            )
         return
 
     for b in all_bookings:
@@ -268,6 +274,14 @@ def run_delivery_tick() -> None:
             _process_single_booking(b, lib_id)
 
     if _has_active_orchestration(all_bookings):
+        waiting = _pick_next_due_booking(all_bookings)
+        if waiting:
+            wid = str(waiting.get("_id", "")).strip()
+            print(
+                f"{_TAG} đơn {wid[:16]}… đã đến/qua giờ hẹn "
+                f"({waiting.get('pickup_date')} {waiting.get('pickup_time')}) "
+                "nhưng đang có đơn khác in_progress (điều phối robot) — chờ xử lý xong."
+            )
         return
 
     nxt = _pick_next_due_booking(all_bookings)
@@ -277,4 +291,8 @@ def run_delivery_tick() -> None:
     cid = str(nxt.get("pickup_location_id", "")).strip()
     if not bid or not cid:
         return
+    print(
+        f"{_TAG} đơn {bid[:16]}… đến giờ hẹn ({nxt.get('pickup_date')} {nxt.get('pickup_time')}) — "
+        "bắt đầu outbound Thư viện → điểm khách."
+    )
     _start_outbound_for_booking(nxt, bid, lib_id, cid)
